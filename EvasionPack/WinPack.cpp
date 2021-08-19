@@ -25,11 +25,10 @@ WinPack::WinPack(std::string path)
 	FixReloc();
 
 	// 7 压缩区段
-	char* ptmp = (char*)DefaultCode.c_str();
-	CompressSection(ptmp);
+	CompressSection(DefaultCode);
 
-
-	EncryptAllSection();// 异或加密
+	// 异或加密
+	EncryptAllSection();
 
 	// 9 填充新区段内容
 	CopySectionData(PackTestSection.c_str(), PackDefaultCode.c_str());
@@ -110,8 +109,6 @@ VOID WinPack::LoadExeFile(LPCSTR FileName)
 
 	// 获取到共享信息
 	ShareData = (PSHAREDATA)GetProcAddress((HMODULE)DllBase, "ShareData");
-
-
 
 }
 
@@ -295,10 +292,10 @@ VOID WinPack::SaveFile(LPCSTR FileName)
 	CloseHandle(FileHandle);
 }
 
-bool WinPack::CompressSection(char* SectionName)
+bool WinPack::CompressSection(std::string SectionName)
 {
 	// 获取这个区段信息
-	PIMAGE_SECTION_HEADER pSection = GetSection(FileBase, SectionName);
+	PIMAGE_SECTION_HEADER pSection = GetSection(FileBase, SectionName.c_str());
 	// 压缩前位置
 	char* pRoffset = (char*)(pSection->PointerToRawData + FileBase);
 	// 区段在文件中的大小

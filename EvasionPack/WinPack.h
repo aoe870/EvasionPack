@@ -72,7 +72,7 @@ public:
 	void SetOEP();// 重新设置OEP
 	void CopySectionData(LPCSTR SectionName, LPCSTR SrcName);// 设置新区段内容(后者拷贝至前者
 	void SaveFile(LPCSTR FileName);// 另存新文件
-	bool CompressSection(char* SectionName);// 压缩区段
+	bool CompressSection(std::string SectionName);// 压缩区段
 	void GetDefaultCodeSection(); //获取默认代码段
 	void XorSection(std::string SectionName);// 异或加密区段
 	void EncryptAllSection(); //全段加密

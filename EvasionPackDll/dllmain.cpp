@@ -7,6 +7,24 @@
 #pragma comment(linker, "/merge:.rdata=.text")
 #pragma comment(linker, "/section:.text,RWE")
 
+
+typedef struct _STRING32 {
+	USHORT   Length;
+	USHORT   MaximumLength;
+	ULONG  Buffer;
+} STRING32;
+typedef STRING32 UNICODE_STRING32;
+
+typedef struct _LDR_DATA_TABLE_ENTRY {
+	LIST_ENTRY  InInitializationOrderLinks;	        //按初始化顺序构成的模块链表，在驱动中此链表为空
+	DWORD   DllBase;				                    //该模块实际加载到了内存的哪个位置
+	DWORD   EntryPoint;				                    //该模块的入口，入口函数
+	DWORD   SizeOfImage;				                //该模块在内存中的大小
+	UNICODE_STRING32    FullDllName;		            //包含路径的模块名
+	UNICODE_STRING32    BaseDllName;		            //不包含路径的模块名
+}LDR_DATA_TABLE_ENTRY, * PLDR_DATA_TABLE_ENTRY;
+
+
 // 导出一个全局变量来共享数据
 extern "C" __declspec(dllexport)SHAREDATA ShareData = { 0 };
 
@@ -84,19 +102,49 @@ DWORD MyGetProcAddress(DWORD Module, LPCSTR FunName)
 }
 
 // 获取 kernel32.dll 的基址
-__declspec(naked) long getkernelbase()
+//__declspec(naked) long getkernelbase()
+HMODULE getKer32Base(void)
 {
+	PLDR_DATA_TABLE_ENTRY pLdrLinkHead = NULL;  // PEB中的模块链表头
+	PLDR_DATA_TABLE_ENTRY pLdrLinkTmp = NULL;   // 用来指向模块链表中的各个节点
+	PCHAR pModuleStr = NULL;
 	__asm
 	{
-		// 按照加载顺序
-		mov eax, dword ptr fs : [0x30]
-		mov eax, dword ptr[eax + 0x0C]
-		mov eax, dword ptr[eax + 0x0C]
-		mov eax, dword ptr[eax]
-		mov eax, dword ptr[eax]
-		mov eax, dword ptr[eax + 0x18]
-		ret
+		push eax
+		mov eax, dword ptr fs : [0x30]   // eax : PEB的地址
+		mov eax, [eax + 0x0C]            // eax : 指向PEB_LDR_DATA结构的指针
+		mov eax, [eax + 0x1C]            // eax : 模块初始化链表的头指针InInitializationOrderModuleList
+		mov pLdrLinkHead, eax
+		pop eax
 	}
+	pLdrLinkTmp = pLdrLinkHead;
+	do {
+		if (pLdrLinkTmp) {
+			pModuleStr = (PCHAR)(pLdrLinkTmp->BaseDllName.Buffer);
+			if (pModuleStr) {
+				if ((pModuleStr[0] == 'K' || pModuleStr[0] == 'k') &&
+					(pModuleStr[2] == 'E' || pModuleStr[2] == 'e') &&
+					(pModuleStr[4] == 'R' || pModuleStr[4] == 'r') &&
+					(pModuleStr[6] == 'N' || pModuleStr[6] == 'n') &&
+					(pModuleStr[8] == 'E' || pModuleStr[8] == 'e') &&
+					(pModuleStr[10] == 'L' || pModuleStr[10] == 'l') &&
+					pModuleStr[12] == '3' &&
+					pModuleStr[14] == '2' &&
+					pModuleStr[16] == '.' &&
+					(pModuleStr[18] == 'D' || pModuleStr[18] == 'd') &&
+					(pModuleStr[20] == 'L' || pModuleStr[20] == 'l') &&
+					(pModuleStr[22] == 'L' || pModuleStr[22] == 'l')
+					)
+				{
+					return (HMODULE)(pLdrLinkTmp->DllBase);
+				}
+			}
+			pLdrLinkTmp = (PLDR_DATA_TABLE_ENTRY)(pLdrLinkTmp->InInitializationOrderLinks.Flink);
+			continue;
+		}
+		break;
+	} while (pLdrLinkHead != pLdrLinkTmp);
+	return (HMODULE)0;
 }
 
 // 解密区段
@@ -141,13 +189,12 @@ __declspec(naked) long JmpOEP()
 void GetAPIAddr()
 {
 	// 所有函数都在这里获取
-	//pVirtualProtect = (PVirtualProtect)MyGetProcAddress(getkernelbase(), "VirtualProtect");
-	//My_VirtualProtect = (PVirtualProtect)MyGetProcAddress(getkernelbase(), "VirtualProtect");
-	My_VirtualProtect = (decltype(VirtualProtect)*)MyGetProcAddress(getkernelbase(), "VirtualProtect");
-	My_GetProcAddress = (decltype(GetProcAddress)*)MyGetProcAddress(getkernelbase(), "GetProcAddress");
-	My_LoadLibraryA = (decltype(LoadLibraryA)*)MyGetProcAddress(getkernelbase(), "LoadLibraryA");
-	My_VirtualAlloc = (decltype(VirtualAlloc)*)MyGetProcAddress(getkernelbase(), "VirtualAlloc");
-	My_VirtualFree = (decltype(VirtualFree)*)MyGetProcAddress(getkernelbase(), "VirtualFree");
+	auto Ker32Base = (DWORD)getKer32Base();
+	My_VirtualProtect = (decltype(VirtualProtect)*)MyGetProcAddress(Ker32Base, "VirtualProtect");
+	My_GetProcAddress = (decltype(GetProcAddress)*)MyGetProcAddress(Ker32Base, "GetProcAddress");
+	My_LoadLibraryA = (decltype(LoadLibraryA)*)MyGetProcAddress(Ker32Base, "LoadLibraryA");
+	My_VirtualAlloc = (decltype(VirtualAlloc)*)MyGetProcAddress(Ker32Base, "VirtualAlloc");
+	My_VirtualFree = (decltype(VirtualFree)*)MyGetProcAddress(Ker32Base, "VirtualFree");
 
 	DWORD huser = (DWORD)My_LoadLibraryA("user32.dll");
 	SetAPI(huser, CreateWindowExA);
@@ -324,165 +371,24 @@ void StaticAntiDebug()
 	}
 }
 
-// 加密IAT
-void EncodeIAT()
-{
-	// 1 获取当前模块基址
-	long Module = getcurmodule();
-	//_asm {
-	//	mov ebx, dword ptr fs : [0x30];
-	//	; PEB 中偏移为 0x08 保存的是加载基址
-	//	mov ebx, dword ptr[ebx + 0x08]
-	//	mov Module, ebx;
-	//}
-
-	// 2 加密IAT(中转站: mov eax 123;jmp eax=jmp 123
-	//	//00FE12B2 | 50				| push eax	|
-	//	//00FE12B3 | 58				| pop eax	| push eip; jmp xxxxxxxxx
-	//	//00FE12B4 | 60				| pushad	|
-	//	//00FE12B5 | 61				| popad		|
-	//	//00FE12B6 | B8 11111111	| mov eax, 11111111 |
-	//	//00FE12BB | FFE0			| jmp eax |
-	char shellcode[] = { "\x50\x58\x60\x61\xB8\x11\x11\x11\x11\xFF\xE0" };
-	// 3 获取导入表地址=偏移+基址
-	PIMAGE_IMPORT_DESCRIPTOR pImport = (PIMAGE_IMPORT_DESCRIPTOR)(Module + ShareData.ImportRva);
-	// 4 循环遍历导入表(以0结尾
-	while (pImport->Name)
-	{
-		// 5 加载相关dll
-		char* dllName = (char*)(pImport->Name + Module);
-		HMODULE Mod = My_LoadLibraryA(dllName);
-		// 6 获取INT/IAT地址
-		DWORD* pInt = (DWORD*)(pImport->OriginalFirstThunk + Module);
-		DWORD* pIat = (DWORD*)(pImport->FirstThunk + Module);
-		// 7 循环遍历INT(以0结尾
-		while (*pInt)// 其指向THUNK结构体,内部是联合体,不管哪个字段有效,都表示一个地址罢了
-		{
-			// 8 获取API地址
-			IMAGE_IMPORT_BY_NAME* FunName = (IMAGE_IMPORT_BY_NAME*)(*pInt + Module);
-			LPVOID Fun = My_GetProcAddress(Mod, FunName->Name);
-			// 9 申请空间保存"中转站"代码,并将真实地址写入
-			char* pbuff = (char*)My_VirtualAlloc(0, 100, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-			memcpy(pbuff, shellcode, sizeof(shellcode));// 假地址保存"中转站"代码
-			*(DWORD*)&pbuff[5] = (DWORD)Fun;// mov eax,真实地址,jmp eax=jmp 真实地址
-			// 10 向IAT填充假地址(可中转到真地址
-			DWORD old;
-			My_VirtualProtect(pIat, 4, PAGE_EXECUTE_READWRITE, &old);// 可写属性
-			*pIat = (DWORD)pbuff;// 不必管联合体字段,直接赋值到*p即可
-			My_VirtualProtect(pIat, 4, old, &old);// 恢复原属性
-			// 11 下个INT/IAT
-			pInt++;
-			pIat++;
-		}
-
-		// 12 下一个导入表
-		pImport++;
-	}
-
-}
-
-
-// 混淆执行函数
-void _stdcall ConfuseExecute(DWORD funcAddr)
-{
-	// 混淆+花指令来执行funcAddr
-	_asm
-	{
-		jmp code1;
-
-	code2:
-		_emit 0xeb; // jmp指令
-		_emit 0x04; // jmp的偏移；本身2，4+2=6(首地址+6，尾地址+4)
-
-		// 3EFF9458 EB023412 : EB02=jmp 2
-		CALL DWORD PTR DS : [EAX + EBX * 2 + 0x123402EB] ; // 3EFF9458 EB023412，jmp 4到EB02 = jmp 2(跳过3412)
-
-		// jmp 2到此												  
-		_emit 0xe8;// call 指令
-		_emit 0x00;// 后4字节表偏移=0
-		_emit 0x00;
-		_emit 0x00;
-		_emit 0x00;
-
-		// call 0 到此
-		_emit 0xeb;// jmp
-		_emit 0x0e;// jmp e
-
-		// 为0x0e充数(11字节
-		PUSH 0x0;// 6A 00
-		PUSH 0x0;// 6A 00
-		MOV EAX, DWORD PTR FS : [0] ;//64A1 00000000
-		PUSH EAX; // 50
-
-		// 3EFF9458 83C01950 : 58=pop eax、83C019=add eax,0x19、50=push eax
-		CALL DWORD PTR DS : [EAX + EBX * 2 + 0x5019C083] ;//3EFF9458 83C01950，jmp e到58=pop eax
-
-		// 执行函数
-		push funcAddr;	// 压入待执行函数
-		retn;				// pop eip，执行栈顶的函数
-
-		// 执行完函数后,跳往结束
-		jmp over;
-
-		// 加一层跳转
-	code1:
-		jmp code2;
-
-		//空,结束
-	over:
-	}
-}
-
-// 全部壳功能代码(传入混淆函数来执行
-void PackCode()
-{
-	// 执行具体的函数(再经过一次混淆
-	ConfuseExecute((DWORD)GetAPIAddr);			// 获取函数的API地址
-	ConfuseExecute((DWORD)AESDecryptAllSection);	// 解密代码段(AES
-	ConfuseExecute((DWORD)UncompressSection);		// 解压缩区段
-	ConfuseExecute((DWORD)StaticAntiDebug);	// 反调试
-	ConfuseExecute((DWORD)FixOldReloc);		// 修复原始程序重定位
-
-}
 
 // 壳代码起始函数
 extern "C" __declspec(dllexport) __declspec(naked) void start()
 {
-	// 花指令
-	_asm
+
+	GetAPIAddr();				// 获取函数的API地址
+	AESDecryptAllSection();		// 解密代码段(AES
+	UncompressSection();		// 解压缩区段
+	StaticAntiDebug();			// 反调试
+	FixOldReloc();				// 修复原始程序重定位
+
+	if (true) {
+
+		My_MessageBoxA(NULL, "this is pack", "Packer", MB_OK);
+		
+	}
+	else
 	{
-		PUSH - 1
-		PUSH 0
-		PUSH 0
-		MOV EAX, DWORD PTR FS : [0]
-		PUSH EAX
-		MOV DWORD PTR FS : [0] , ESP
-		SUB ESP, 0x68
-		PUSH EBX
-		PUSH ESI
-		PUSH EDI
-		POP EAX
-		POP EAX
-		POP EAX
-		ADD ESP, 0x68
-		POP EAX
-		MOV DWORD PTR FS : [0] , EAX
-		POP EAX
-		POP EAX
-		POP EAX
-		POP EAX
-		MOV EBP, EAX
-	}
-
-	// 混淆执行
-	ConfuseExecute((DWORD)PackCode);
-
-	if (false) {
-
-		My_MessageBoxA(NULL, "this is pack", "title", MB_OK);
-		 
-	}
-	else {
 		JmpOEP();// 跳转到原始 oep
 	}
 	
