@@ -177,8 +177,12 @@ void FixOldReloc()
 	PIMAGE_BASE_RELOCATION RealocTable =
 		(PIMAGE_BASE_RELOCATION)(ShareData.oldRelocRva + hModule);
 
+	if (ShareData.oldRelocRva == 0) {
+		return;
+
+	}
 	// 如果 SizeOfBlock 不为空，就说明存在重定位块
-	while (RealocTable->SizeOfBlock)
+	while (RealocTable->SizeOfBlock )
 	{
 		// 如果重定位的数据在代码段，就需要修改访问属性
 		My_VirtualProtect((LPVOID)(RealocTable->VirtualAddress + hModule),
@@ -189,7 +193,7 @@ void FixOldReloc()
 		TypeOffset* to = (TypeOffset*)(RealocTable + 1);
 
 		// 遍历每一个重定位项
-		for (int i = 0; i < count; ++i)
+		for (int i = 0; i < count; i++)
 		{
 			// 如果 type 的值为 3 我们才需要关注
 			if (to[i].Type == 3)
@@ -210,6 +214,9 @@ void FixOldReloc()
 		RealocTable = (PIMAGE_BASE_RELOCATION)
 			((DWORD)RealocTable + RealocTable->SizeOfBlock);
 	}
+
+
+	
 }
 
 // 解压缩区段
@@ -374,104 +381,6 @@ void EncodeIAT()
 
 }
 
-// 回调函数
-LRESULT CALLBACK MyWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
-{
-	// 保存编辑框句柄
-	static HWND Edithwnd = 0;
-
-	switch (msg)
-	{
-	case WM_CREATE:
-	{
-		// 创建窗口
-		HINSTANCE instance = (HINSTANCE)getcurmodule();
-
-		//HWND hBit = pfnCreateWindowEx(0, L"static", L"密码", WS_CHILD | WS_VISIBLE,
-		//	50, 50, 30, 20, hWnd, (HMENU)10004, g_hInstance, NULL);
-		//hEdit = pfnCreateWindowEx(0, L"edit", L"", WS_CHILD | WS_VISIBLE | WS_BORDER,
-		//	100, 50, 120, 20, hWnd, (HMENU)10003, g_hInstance, NULL);
-		//pfnCreateWindowEx(0, L"button", L"确定", WS_CHILD | WS_VISIBLE,
-		//	50, 100, 60, 30, hWnd, (HMENU)10001, g_hInstance, NULL);
-		//pfnCreateWindowEx(0, L"button", L"取消", WS_CHILD | WS_VISIBLE,
-		//	150, 100, 60, 30, hWnd, (HMENU)10002, g_hInstance, NULL);
-
-
-		Edithwnd = My_CreateWindowExA(0, "edit", NULL, WS_VISIBLE | WS_CHILD | WS_BORDER, 100, 50, 120, 20,
-			hwnd, (HMENU)0x1000, instance, 0);
-		My_CreateWindowExA(0, "button", "确定", WS_VISIBLE | WS_CHILD, 50, 100, 60, 30, hwnd, (HMENU)0x1001, instance, 0);
-		My_CreateWindowExA(0, "button", "取消", WS_VISIBLE | WS_CHILD, 150, 100, 60, 30, hwnd, (HMENU)0x1002, instance, 0);
-		HWND hBit = My_CreateWindowExA(0, "static", "密码", WS_CHILD | WS_VISIBLE, 50, 50, 30, 20, hwnd, (HMENU)1003, instance, NULL);
-
-		//Edithwnd = My_CreateWindowExA(0, "edit", NULL, WS_VISIBLE | WS_CHILD | WS_BORDER, 20, 20, 100, 20,
-		//	hwnd, (HMENU)0x1000, instance, 0);
-		//My_CreateWindowExA(0, "button", "确定", WS_VISIBLE | WS_CHILD, 30, 50, 50, 20,hwnd, (HMENU)0x1001, instance, 0);
-
-
-
-		break;
-	}
-	case WM_COMMAND:
-	{
-		// 按钮点击事件
-		if (wparam == 0x1001)
-		{
-			char buff[100];
-			// 获取文本
-			My_GetWindowTextA(Edithwnd, buff, 100);
-			if (!strcmp(buff, "123"))
-			{
-				//退出窗口
-				My_PostQuitMessage(0);
-				My_ShowWindow(hwnd, SW_HIDE);
-				break;
-			}
-		}
-
-		break;
-	}
-
-	}
-
-	return My_DefWindowProcA(hwnd, msg, wparam, lparam);
-}
-
-// 显示窗口
-void AlertPassWindow()
-{
-	// 0 创建窗口类
-	WNDCLASSEXA ws = { sizeof(ws) };
-	ws.style = CS_HREDRAW | CS_VREDRAW;
-	ws.hInstance = (HINSTANCE)getcurmodule();
-	ws.lpfnWndProc = MyWndProc;
-	ws.hbrBackground = (HBRUSH)My_GetStockObject(WHITE_BRUSH);
-	ws.lpszClassName = "MyPack";
-
-	//1 .注册窗口类
-	My_RegisterClassExA(&ws);
-
-	//2. 创建窗口
-	HWND hwnd = My_CreateWindowExA(0,
-		"MyPack",
-		"MyPack",
-		WS_OVERLAPPEDWINDOW,
-		100, 100, 300, 200, NULL, NULL,
-		(HINSTANCE)getcurmodule(), NULL);
-
-	//3 . 显示更新
-	My_ShowWindow(hwnd, SW_SHOW);
-	My_UpdateWindow(hwnd);
-
-	//4. 消息循环
-	MSG msg;
-	while (My_GetMessageA(&msg, 0, 0, 0))
-	{
-		//5. 转换消息 分发消息 
-		My_TranslateMessage(&msg);
-		My_DispatchMessageA(&msg);
-	}
-
-}
 
 // 混淆执行函数
 void _stdcall ConfuseExecute(DWORD funcAddr)
@@ -529,12 +438,9 @@ void PackCode()
 {
 	// 执行具体的函数(再经过一次混淆
 	ConfuseExecute((DWORD)GetAPIAddr);			// 获取函数的API地址
-
 	ConfuseExecute((DWORD)AESDecryptAllSection);	// 解密代码段(AES
 	ConfuseExecute((DWORD)UncompressSection);		// 解压缩区段
 	ConfuseExecute((DWORD)StaticAntiDebug);	// 反调试
-	ConfuseExecute((DWORD)AlertPassWindow);	// 恢复数据目录表
-
 	ConfuseExecute((DWORD)FixOldReloc);		// 修复原始程序重定位
 
 }
@@ -571,18 +477,13 @@ extern "C" __declspec(dllexport) __declspec(naked) void start()
 	// 混淆执行
 	ConfuseExecute((DWORD)PackCode);
 
-	// 正常执行
-	//getapi();//获取函数的API地址
-	//// 解密(解压缩)区段
-	//xorsection();
-	////DecryptSection();//解密代码段
-	//uncompress();// 解压缩区段
-	////RecoverDataDirTab();//恢复数据目录表
-	////StaticAntiDebug();//反调试
-	////AlertPassBox();//密码弹框
-	//ShowMyWindows();//密码弹框
-	//FixOldReloc();// 修复原始程序重定位
-	//EncodeIat();//加密IAT
+	if (false) {
 
-	JmpOEP();// 跳转到原始 oep
+		My_MessageBoxA(NULL, "this is pack", "title", MB_OK);
+		 
+	}
+	else {
+		JmpOEP();// 跳转到原始 oep
+	}
+	
 }

@@ -26,7 +26,7 @@ WinPack::WinPack(std::string path)
 
 	// 7 压缩区段
 	char* ptmp = (char*)DefaultCode.c_str();
-//	CompressSection(ptmp);
+	CompressSection(ptmp);
 
 
 	EncryptAllSection();// 异或加密
@@ -34,8 +34,9 @@ WinPack::WinPack(std::string path)
 	// 9 填充新区段内容
 	CopySectionData(PackTestSection.c_str(), PackDefaultCode.c_str());
 	CopySectionData(PackRelocName.c_str(), ".reloc");
+
 	// 10 另存为新文件
-	SaveFile("../output/demo_pack1.exe");
+	SaveFile("../output/demo_pack.exe");
 }
 
 
@@ -160,6 +161,9 @@ VOID WinPack::AddSection(LPCSTR SectionName, LPCSTR SrcName)
 
 VOID WinPack::FixReloc()
 {
+	DWORD Sizes = 0;
+
+
 	DWORD Size = 0, OldProtect = 0;
 
 	// 获取到程序的重定位表
@@ -167,7 +171,7 @@ VOID WinPack::FixReloc()
 		ImageDirectoryEntryToData((PVOID)DllBase, TRUE, 5, &Size);
 
 	// 如果 SizeOfBlock 不为空，就说明存在重定位块
-	while (RealocTable->SizeOfBlock)
+	while (RealocTable->SizeOfBlock )
 	{
 		// 如果重定位的数据在代码段，就需要修改访问属性
 		VirtualProtect((LPVOID)(RealocTable->VirtualAddress + DllBase),
@@ -178,7 +182,7 @@ VOID WinPack::FixReloc()
 		TypeOffset* to = (TypeOffset*)(RealocTable + 1);
 
 		// 遍历每一个重定位项，输出内容
-		for (int i = 0; i < count; ++i)
+		for (int i = 0; i < count; i++)
 		{
 			// 如果 type 的值为 3 我们才需要关注
 			if (to[i].Type == 3)
@@ -411,12 +415,20 @@ void WinPack::XorSection(std::string SectionName)
 /// </summary>
 void WinPack::EncryptAllSection()
 {
+	//unsigned char key1[] =
+	//{
+	//	0x2b, 0x7e, 0x15, 0x16,
+	//	0x28, 0xae, 0xd2, 0xa6,
+	//	0xab, 0xf7, 0x15, 0x88,
+	//	0x09, 0xcf, 0x4f, 0x3c
+	//};
+
 	unsigned char key1[] =
 	{
-		0x2b, 0x7e, 0x15, 0x16,
-		0x28, 0xae, 0xd2, 0xa6,
-		0xab, 0xf7, 0x15, 0x88,
-		0x09, 0xcf, 0x4f, 0x3c
+		0xab, 0x74, 0xf5, 0x36,
+		0x28, 0xae, 0xd2, 0xa4,
+		0xaa, 0xf7, 0x15, 0x82,
+		0x19, 0x2b, 0x44, 0x3c
 	};
 
 	//初始化aes对象
