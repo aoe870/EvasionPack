@@ -60,7 +60,7 @@ void GetUserOperate(std::map<std::string, std::string> table) {
 int main(int argc, char** argv)
 {
 
-    std::cout << LOGO << std::endl;
+    //std::cout << LOGO << std::endl;
  
     if (sizeof(argc) < 2) {
 
