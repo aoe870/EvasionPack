@@ -60,7 +60,7 @@ class WinPack
 
 public:
 
-	WinPack(std::string path);
+	WinPack(std::string path, std::string fileName);
 	DWORD Alignment(DWORD n, DWORD align);// 文件/内存对齐
 	PIMAGE_SECTION_HEADER GetSection(DWORD Base, LPCSTR SectionName);// 获取区段头信息
 
@@ -78,6 +78,7 @@ public:
 	void EncryptAllSection(); //全段加密
 	void GetPackDefaultCodeSection();//获取壳的默认代码段
 	bool IsFeFile();
+	void SetClearImport();
 
 private:
 	DWORD FileSize = 0;// 文件大小,申请内存/保存文件时会用到

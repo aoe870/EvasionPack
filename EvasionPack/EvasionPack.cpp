@@ -40,8 +40,18 @@ void GetUserOperate(std::map<std::string, std::string> table) {
         if (iter.first == "-h") {
             PrintLog(Help_Test);
         }
+        //加壳
         else if (iter.first == "-f") {
-            WinPack pack(iter.second);
+
+            std::string newFileName = "demo_pack.exe" ;
+
+            for (auto map : table) {
+                if (map.first == "-n") {
+                    newFileName = map.second;
+                }
+            }
+
+            WinPack pack(iter.second, newFileName);
         }
         
     }

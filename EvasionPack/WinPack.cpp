@@ -5,13 +5,14 @@
 #include "lz4.h"
 #include "AES.h"
 #include <DbgHelp.h>
-#pragma comment(lib, "DbgHelp.lib")
 
+#pragma comment(lib, "DbgHelp.lib")
 
 std::vector<std::string> DllNameTable{ "EvasionPackDll.dll" };
 
-WinPack::WinPack(std::string path)
-{
+WinPack::WinPack(std::string path, std::string fileName)
+{	
+
 	LoadExeFile(path.c_str());
 
 	// 2 添加新区段
@@ -20,6 +21,9 @@ WinPack::WinPack(std::string path)
 
 	// 3 重新设置OEP
 	SetOEP();
+
+	// 4 操作导入表
+	//SetClearImport();
 
 	// 修复壳重定位	
 	FixReloc();
@@ -35,15 +39,27 @@ WinPack::WinPack(std::string path)
 	CopySectionData(PackRelocName.c_str(), ".reloc");
 
 	// 10 另存为新文件
-	SaveFile("../output/demo_pack.exe");
+	SaveFile(("../output/" + fileName).c_str());
 }
 
-
+/// <summary>
+/// 内存对齐
+/// </summary>
+/// <param name="n"></param>
+/// <param name="align"></param>
+/// <returns></returns>
 DWORD WinPack::Alignment(DWORD n, DWORD align)
 {
 	return n % align == 0 ? n : (n / align + 1) * align;
 }
 
+/// <summary>
+/// 获取模块表段
+/// </summary>
+/// <param name="Base">模块基址</param>
+/// <param name="SectionName">表块名
+/// </param>
+/// <returns></returns>
 PIMAGE_SECTION_HEADER WinPack::GetSection(DWORD Base, LPCSTR SectionName)
 {
 	// 1. 获取到区段表的第一项
@@ -63,6 +79,10 @@ PIMAGE_SECTION_HEADER WinPack::GetSection(DWORD Base, LPCSTR SectionName)
 	return nullptr;
 }
 
+/// <summary>
+/// 
+/// </summary>
+/// <param name="FileName"></param>
 VOID WinPack::LoadExeFile(LPCSTR FileName)
 {
 	// 如果文件存在，就打开文件，打开的目的只是为了读取其中的数据
@@ -156,6 +176,9 @@ VOID WinPack::AddSection(LPCSTR SectionName, LPCSTR SrcName)
 	GET_OPTIONAL_HEADER(FileBase)->SizeOfImage = NewSection->VirtualAddress + NewSection->Misc.VirtualSize;
 }
 
+/// <summary>
+/// 
+/// </summary>
 VOID WinPack::FixReloc()
 {
 	DWORD Sizes = 0;
@@ -229,7 +252,9 @@ VOID WinPack::FixReloc()
 	SetRelocTable();
 }
 
-
+/// <summary>
+/// 
+/// </summary>
 VOID WinPack::SetRelocTable()
 {
 	// 获取原始程序的重定位表，进行备份
@@ -254,6 +279,9 @@ VOID WinPack::SetRelocTable()
 	return VOID();
 }
 
+/// <summary>
+/// 重新设置OEP
+/// </summary>
 VOID WinPack::SetOEP()
 {
 	// 修改原始 oep 之前，保存 oep
@@ -266,6 +294,11 @@ VOID WinPack::SetOEP()
 		GetSection(FileBase, PackTestSection.c_str())->VirtualAddress;
 }
 
+/// <summary>
+/// 填充新区段内容
+/// </summary>
+/// <param name="SectionName"></param>
+/// <param name="SrcName"></param>
 VOID WinPack::CopySectionData(LPCSTR SectionName, LPCSTR SrcName)
 {
 	// 获取源区段在虚拟空间(dll->映像)中的基址
@@ -292,6 +325,11 @@ VOID WinPack::SaveFile(LPCSTR FileName)
 	CloseHandle(FileHandle);
 }
 
+/// <summary>
+/// 压缩区段
+/// </summary>
+/// <param name="SectionName"></param>
+/// <returns></returns>
 bool WinPack::CompressSection(std::string SectionName)
 {
 	// 获取这个区段信息
@@ -379,13 +417,15 @@ void WinPack::GetDefaultCodeSection()
 			DefaultCode = std::move(std::string((char*)SecHeader[iter].Name));
 			return;
 		}
-
 	}
 
 	DefaultCode = "";
 }
 
-//加密默认代码段
+/// <summary>
+/// 加密默认代码段
+/// </summary>
+/// <param name="SectionName"></param>
 void WinPack::XorSection(std::string SectionName)
 {
 	// 1. 获取到需要加密的区段的信息
@@ -412,13 +452,6 @@ void WinPack::XorSection(std::string SectionName)
 /// </summary>
 void WinPack::EncryptAllSection()
 {
-	//unsigned char key1[] =
-	//{
-	//	0x2b, 0x7e, 0x15, 0x16,
-	//	0x28, 0xae, 0xd2, 0xa6,
-	//	0xab, 0xf7, 0x15, 0x88,
-	//	0x09, 0xcf, 0x4f, 0x3c
-	//};
 
 	unsigned char key1[] =
 	{
@@ -518,4 +551,19 @@ bool WinPack::IsFeFile()
 	}
 
 	return true;
+}
+
+// 操作导入表
+void WinPack::SetClearImport()
+{
+	// 1 保存导入表
+	PIMAGE_NT_HEADERS pNt = GET_NT_HEADER(FileBase);
+	ShareData->ImportRva = pNt->OptionalHeader.DataDirectory[1].VirtualAddress;
+	// 2 清空导入表
+	pNt->OptionalHeader.DataDirectory[1].VirtualAddress = 0;
+	pNt->OptionalHeader.DataDirectory[1].Size = 0;
+	// 3 清空IAT表
+	pNt->OptionalHeader.DataDirectory[12].VirtualAddress = 0;
+	pNt->OptionalHeader.DataDirectory[12].Size = 0;
+	return;
 }

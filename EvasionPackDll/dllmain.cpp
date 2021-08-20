@@ -7,6 +7,15 @@
 #pragma comment(linker, "/merge:.rdata=.text")
 #pragma comment(linker, "/section:.text,RWE")
 
+#define GET_DOS_HEADER(x) ((PIMAGE_DOS_HEADER)(x))
+#define GET_NT_HEADER(x) ((PIMAGE_NT_HEADERS)((DWORD)GET_DOS_HEADER(x)->e_lfanew + (DWORD)(x)))
+#define GET_FILE_HEADER(x) ((PIMAGE_FILE_HEADER)(&GET_NT_HEADER(x)->FileHeader))
+#define GET_OPTIONAL_HEADER(x) ((PIMAGE_OPTIONAL_HEADER)(&GET_NT_HEADER(x)->OptionalHeader))
+#define GET_SECTION_HEADER( x ) ((PIMAGE_SECTION_HEADER)        \
+    ((ULONG_PTR)(GET_NT_HEADER(x)) +                                            \
+     FIELD_OFFSET( IMAGE_NT_HEADERS, OptionalHeader ) +                 \
+     ((GET_NT_HEADER(x)))->FileHeader.SizeOfOptionalHeader   \
+    ))
 
 typedef struct _STRING32 {
 	USHORT   Length;
@@ -47,24 +56,16 @@ DefApiFun(DispatchMessageA);
 DefApiFun(GetWindowTextA);
 DefApiFun(PostQuitMessage);
 DefApiFun(MessageBoxA);
+DefApiFun(GetSystemInfo);
+DefApiFun(GetTickCount64);
+DefApiFun(GlobalMemoryStatusEx);
 
-// 获取PE头信息
-PIMAGE_DOS_HEADER GetDosHeader(DWORD fileBase)
-{
-	return (PIMAGE_DOS_HEADER)fileBase;
-}
-PIMAGE_NT_HEADERS GetNtHeader(DWORD fileBase)
-{
-	return (PIMAGE_NT_HEADERS)(fileBase + GetDosHeader(fileBase)->e_lfanew);
-}
-PIMAGE_FILE_HEADER GetFileHeader(DWORD fileBase)
-{
-	return &GetNtHeader(fileBase)->FileHeader;
-}
-PIMAGE_OPTIONAL_HEADER GetOptHeader(DWORD fileBase)
-{
-	return &GetNtHeader(fileBase)->OptionalHeader;
-}
+DefApiFun(CreateFileW)
+DefApiFun(CloseHandle)
+DefApiFun(GetFileAttributesW)
+DefApiFun(ReadFileEx)
+DefApiFun(WriteFile)
+DefApiFun(DeleteFileW)
 
 // 获取当前加载基址
 __declspec(naked) long getcurmodule()
@@ -195,6 +196,17 @@ void GetAPIAddr()
 	My_LoadLibraryA = (decltype(LoadLibraryA)*)MyGetProcAddress(Ker32Base, "LoadLibraryA");
 	My_VirtualAlloc = (decltype(VirtualAlloc)*)MyGetProcAddress(Ker32Base, "VirtualAlloc");
 	My_VirtualFree = (decltype(VirtualFree)*)MyGetProcAddress(Ker32Base, "VirtualFree");
+	My_GetSystemInfo = (decltype(GetSystemInfo)*)MyGetProcAddress(Ker32Base, "GetSystemInfo");
+	My_GetTickCount64 = (decltype(GetTickCount64)*)MyGetProcAddress(Ker32Base, "GetTickCount64");
+	My_GlobalMemoryStatusEx = (decltype(GlobalMemoryStatusEx)*)MyGetProcAddress(Ker32Base, "GlobalMemoryStatusEx");
+	
+	My_CloseHandle = (decltype(CloseHandle)*)MyGetProcAddress(Ker32Base, "CloseHandle");
+	My_GetFileAttributesW = (decltype(GetFileAttributesW)*)MyGetProcAddress(Ker32Base, "GetFileAttributesW");
+	My_ReadFileEx = (decltype(ReadFileEx)*)MyGetProcAddress(Ker32Base, "ReadFileEx");
+	My_WriteFile = (decltype(WriteFile)*)MyGetProcAddress(Ker32Base, "WriteFile");
+	My_DeleteFileW = (decltype(DeleteFile)*)MyGetProcAddress(Ker32Base, "DeleteFileW");
+	My_CreateFileW = (decltype(CreateFileW)*)MyGetProcAddress(Ker32Base, "CreateFileW");
+
 
 	DWORD huser = (DWORD)My_LoadLibraryA("user32.dll");
 	SetAPI(huser, CreateWindowExA);
@@ -262,8 +274,6 @@ void FixOldReloc()
 			((DWORD)RealocTable + RealocTable->SizeOfBlock);
 	}
 
-
-	
 }
 
 // 解压缩区段
@@ -299,6 +309,9 @@ void UncompressSection()
 
 }
 
+/// <summary>
+/// 
+/// </summary>
 void AESDecryptAllSection()
 {
 	//获取当前程序的基址
@@ -333,7 +346,7 @@ void RecoverDataDirTab()
 	// 2 遍历数据目录表
 	DWORD dwNumOfDataDir = ShareData.dwNumOfDataDir;
 	DWORD dwOldAttr = 0;
-	PIMAGE_DATA_DIRECTORY pDataDirectory = (GetOptHeader(dwBase)->DataDirectory);
+	PIMAGE_DATA_DIRECTORY pDataDirectory = (GET_OPTIONAL_HEADER(dwBase)->DataDirectory);
 	for (DWORD i = 0; i < dwNumOfDataDir; i++)
 	{
 		// 3 资源表无需修改
@@ -355,7 +368,7 @@ void RecoverDataDirTab()
 }
 
 // 静态反调试
-void StaticAntiDebug()
+bool StaticAntiDebug()
 {
 	bool BeingDugged = false;
 	__asm
@@ -369,27 +382,310 @@ void StaticAntiDebug()
 		My_MessageBoxA(NULL, "调试状态", "警告", MB_OK);
 		My_ExitProcess(1);
 	}
+
+	return true;
 }
 
+/// <summary>
+/// 
+/// </summary>
+void EncodeIAT()
+{
+	 
+	// 1 获取当前模块基址
+	long Module = getcurmodule();
+	char shellcode[] = { "\x50\x58\x60\x61\xB8\x11\x11\x11\x11\xFF\xE0" };
+	
+	// 3 获取导入表地址=偏移+基址
+	PIMAGE_IMPORT_DESCRIPTOR pImport = (PIMAGE_IMPORT_DESCRIPTOR)(Module + ShareData.ImportRva);
+	// 4 循环遍历导入表(以0结尾
+	while (pImport->Name)
+	{
+		// 5 加载相关dll
+		char* dllName = (char*)(pImport->Name + Module);
+		HMODULE Mod = My_LoadLibraryA(dllName);
+		// 6 获取INT/IAT地址
+		DWORD* pInt = (DWORD*)(pImport->OriginalFirstThunk + Module);
+		DWORD* pIat = (DWORD*)(pImport->FirstThunk + Module);
+		// 7 循环遍历INT(以0结尾
+		while (*pInt)// 其指向THUNK结构体,内部是联合体,不管哪个字段有效,都表示一个地址罢了
+		{
+			// 8 获取API地址
+			IMAGE_IMPORT_BY_NAME* FunName = (IMAGE_IMPORT_BY_NAME*)(*pInt + Module);
+			LPVOID Fun = My_GetProcAddress(Mod, FunName->Name);
+			// 9 申请空间保存"中转站"代码,并将真实地址写入
+			char* pbuff = (char*)My_VirtualAlloc(0, 100, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+			memcpy(pbuff, shellcode, sizeof(shellcode));// 假地址保存"中转站"代码
+			*(DWORD*)&pbuff[5] = (DWORD)Fun;// mov eax,真实地址,jmp eax=jmp 真实地址
+			// 10 向IAT填充假地址(可中转到真地址
+			DWORD old;
+			My_VirtualProtect(pIat, 4, PAGE_EXECUTE_READWRITE, &old);// 可写属性
+			*pIat = (DWORD)pbuff;// 不必管联合体字段,直接赋值到*p即可
+			My_VirtualProtect(pIat, 4, old, &old);// 恢复原属性
+			// 11 下个INT/IAT
+			pInt++;
+			pIat++;
+		}
+
+		// 12 下一个导入表
+		pImport++;
+	}
+
+}
+
+
+/// <summary>
+/// 沙箱检测
+/// </summary>
+/// <returns></returns>
+bool  detectionSandbox() {
+
+	//过度
+	SYSTEM_INFO systemInfo;
+	My_GetSystemInfo(&systemInfo);
+	DWORD numberOfProcessors = systemInfo.dwNumberOfProcessors;
+	if (numberOfProcessors < 2) {
+		return false;
+	}
+
+	ULONGLONG uptime = My_GetTickCount64() / 1000;
+	if (uptime < 1200) {
+		return false;
+	}
+
+	//内存数量
+	MEMORYSTATUSEX memoryStatus;
+	memoryStatus.dwLength = sizeof(memoryStatus);
+	My_GlobalMemoryStatusEx(&memoryStatus);
+	DWORD RAMMB = memoryStatus.ullTotalPhys / 1024 / 1024;
+	if (RAMMB < 1024) {
+		return false;
+	}
+
+	return true;
+
+}
+
+bool AdversarialSandBox() {
+
+	wchar_t name[] = L"a";
+
+	DWORD dwAttrib = My_GetFileAttributesW(name);
+
+	if (dwAttrib != INVALID_FILE_ATTRIBUTES &&
+		!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
+		My_MessageBoxA(NULL, "Can not open the file", "Playwav", MB_OK);
+		return false;
+	}
+
+	HANDLE hOpenFile = (HANDLE)My_CreateFileW(name,
+		GENERIC_WRITE,          // open for writing
+		0,                      // do not share
+		NULL,                   // default security
+		CREATE_NEW,             // create new file only
+		FILE_ATTRIBUTE_NORMAL,  // normal file
+		NULL);
+	if (hOpenFile == INVALID_HANDLE_VALUE)
+	{
+		hOpenFile = NULL;
+		My_MessageBoxA(NULL, "Can not open the file", "Playwav", MB_OK);
+		return false;
+	}
+
+	char str[] = "t     erwrwhis is test";
+	DWORD dwBytesWritten = 0;
+	auto bErrorFlag = My_WriteFile(
+		hOpenFile,           // open file handle
+		str,      // start of data to write
+		strlen(str),  // number of bytes to write
+		&dwBytesWritten, // number of bytes that were written
+		NULL);
+
+
+	My_CloseHandle(hOpenFile);
+
+	hOpenFile = My_CreateFileW(name,               // file to open
+		GENERIC_READ,          // open for reading
+		FILE_SHARE_READ,       // share for reading
+		NULL,                  // default security
+		OPEN_EXISTING,         // existing file only
+		FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, // normal file
+		NULL);                 // no attr. template
+
+	if (hOpenFile == INVALID_HANDLE_VALUE)
+	{
+
+		hOpenFile = NULL;
+		My_MessageBoxA(NULL, "Can not open the file", "Playwav", MB_OK);
+		return false;
+	}
+
+	char   ReadBuffer[255] = { 0 };
+	OVERLAPPED ol = { 0 };
+	if (FALSE == My_ReadFileEx(hOpenFile, ReadBuffer, 255 - 1, &ol, NULL))
+	{
+		hOpenFile = NULL;
+		My_MessageBoxA(NULL, "Can not open the file", "Playwav", MB_OK);
+		return false;
+	}
+
+	if (ReadBuffer[3] == 0x20) {
+		My_CloseHandle(hOpenFile);
+		My_DeleteFileW(name);
+		return true;
+	}
+
+
+	My_CloseHandle(hOpenFile);	
+	My_DeleteFileW(name);
+	return false;
+}
+
+
+// 回调函数
+LRESULT CALLBACK MyWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+	// 保存编辑框句柄
+	static HWND Edithwnd = 0;
+
+	switch (msg)
+	{
+	case WM_CREATE:
+	{
+		// 创建窗口
+		HINSTANCE instance = (HINSTANCE)getcurmodule();
+
+		Edithwnd = My_CreateWindowExA(0, "edit", NULL, WS_VISIBLE | WS_CHILD | WS_BORDER, 100, 50, 120, 20,
+			hwnd, (HMENU)0x1000, instance, 0);
+		My_CreateWindowExA(0, "button", "确定", WS_VISIBLE | WS_CHILD, 50, 100, 60, 30, hwnd, (HMENU)0x1001, instance, 0);
+		My_CreateWindowExA(0, "button", "取消", WS_VISIBLE | WS_CHILD, 150, 100, 60, 30, hwnd, (HMENU)0x1002, instance, 0);
+		HWND hBit = My_CreateWindowExA(0, "static", "密码", WS_CHILD | WS_VISIBLE, 50, 50, 30, 20, hwnd, (HMENU)1003, instance, NULL);
+
+		break;
+	}
+	case WM_COMMAND:
+	{
+		// 按钮点击事件
+		if (wparam == 0x1001)
+		{
+
+			My_MessageBoxA(NULL, "check", "Packer", MB_OK);
+			char buff[100];
+			// 获取文本
+			My_GetWindowTextA(Edithwnd, buff, 100);
+			if (!strcmp(buff, "123"))
+			{
+
+				if (detectionSandbox() == false && StaticAntiDebug() == false) {
+
+					My_MessageBoxA(NULL, "this is sendBox", "Packer", MB_OK);
+
+				}
+				else
+				{
+					// 解密代码段(AES
+					AESDecryptAllSection();
+					// 解压缩区段
+					UncompressSection();
+					// 修复原始程序重定位
+					FixOldReloc();
+					//EncodeIAT();
+					JmpOEP();// 跳转到原始 oep
+				}
+
+				//退出窗口
+				My_PostQuitMessage(0);
+				My_ShowWindow(hwnd, SW_HIDE);
+				break;
+			}
+		}
+
+		break;
+	}
+
+	}
+
+	return My_DefWindowProcA(hwnd, msg, wparam, lparam);
+}
+
+// 显示窗口
+void AlertPassWindow()
+{
+	// 0 创建窗口类
+	WNDCLASSEXA ws = { sizeof(ws) };
+	ws.style = CS_HREDRAW | CS_VREDRAW;
+	ws.hInstance = (HINSTANCE)getcurmodule();
+	ws.lpfnWndProc = MyWndProc;
+	ws.hbrBackground = (HBRUSH)My_GetStockObject(WHITE_BRUSH);
+	ws.lpszClassName = "MyPack";
+
+	//1 .注册窗口类
+	My_RegisterClassExA(&ws);
+
+	//2. 创建窗口
+	HWND hwnd = My_CreateWindowExA(0,
+		"MyPack",
+		"MyPack",
+		WS_OVERLAPPEDWINDOW,
+		100, 100, 300, 200, NULL, NULL,
+		(HINSTANCE)getcurmodule(), NULL);
+
+	//3 . 显示更新
+	My_ShowWindow(hwnd, SW_SHOW);
+	My_UpdateWindow(hwnd);
+
+	//4. 消息循环
+	MSG msg;
+	while (My_GetMessageA(&msg, 0, 0, 0))
+	{
+		//5. 转换消息 分发消息 
+		My_TranslateMessage(&msg);
+		My_DispatchMessageA(&msg);
+	}
+
+}
+
+void testss() {
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+	wchar_t name[] = L"abas";
+	HANDLE hOpenFile = (HANDLE)My_CreateFileW(name,
+		GENERIC_WRITE,          // open for writing
+		0,                      // do not share
+		NULL,                   // default security
+		CREATE_NEW,             // create new file only
+		FILE_ATTRIBUTE_NORMAL,  // normal file
+		NULL);
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+	My_CloseHandle(hOpenFile);
+	
+	My_MessageBoxA(NULL, "testss21", "Playwav", MB_OK);
+	My_DeleteFileW(name);
+}
+
+//反调试
 
 // 壳代码起始函数
 extern "C" __declspec(dllexport) __declspec(naked) void start()
 {
+	// 获取函数的API地址
+	GetAPIAddr();				
 
-	GetAPIAddr();				// 获取函数的API地址
-	AESDecryptAllSection();		// 解密代码段(AES
-	UncompressSection();		// 解压缩区段
-	StaticAntiDebug();			// 反调试
-	FixOldReloc();				// 修复原始程序重定位
+	if (AdversarialSandBox()) {
+		if (detectionSandbox() == false && StaticAntiDebug() == false) {
 
-	if (true) {
-
-		My_MessageBoxA(NULL, "this is pack", "Packer", MB_OK);
-		
-	}
-	else
-	{
-		JmpOEP();// 跳转到原始 oep
-	}
+			My_MessageBoxA(NULL, "this is sendBox", "Packer", MB_OK);
+		}
+		else
+		{
+			// 解密代码段(AES
+			AESDecryptAllSection();
+			// 解压缩区段
+			UncompressSection();
+			// 修复原始程序重定位
+			FixOldReloc();
+			//EncodeIAT();
+			JmpOEP();// 跳转到原始 oep
+		}
 	
+	}
 }
