@@ -1,11 +1,27 @@
 #include "PeOperation.h"
+#include <iostream>
+#include <time.h>
+#include "Common.h"
 
-ULONG_PTR PeOperation::Alignment(_In_ ULONG_PTR uValue, ULONG_PTR uAlign)
+PE::PE()
 {
-	return ((uValue + uAlign - 1) / uAlign * uAlign);
 }
 
-BOOL PeOperation::IsPEFile(UCHAR* pFileBuffer, HWND hwndDlg)
+PE::~PE()
+{
+}
+
+//时间戳转换为标准时间
+TCHAR* PE::Stamp_To_Standard(DWORD stampTime)
+{
+	time_t tick = (time_t)stampTime;
+	struct tm tm;
+	localtime_s(&tm, &tick);
+	_tcsftime(s, sizeof(s), (TCHAR*)_T("%Y-%m-%d %H:%M:%S"), &tm);
+	return s;
+}
+
+BOOLEAN PE::IsPEFile(UCHAR* pFileBuffer, HWND hwndDlg)
 {
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFileBuffer;
 	if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
@@ -39,7 +55,19 @@ BOOL PeOperation::IsPEFile(UCHAR* pFileBuffer, HWND hwndDlg)
 	return TRUE;
 }
 
-VOID PeOperation::PerformBaseRelocation(POINTER_TYPE buff, POINTER_TYPE Value)
+/*////////////////////////////////////////////////////////////////
+*※※*  FullName:	PerformBaseRelocation
+*※※*  功能	:	修复重定位表
+*※※*  Returns:	无
+*※※*  Parameter:	char* buff,PE文件首地址
+*※※*  Parameter:	POINTER_TYPE Value，buff的基址与贴在内存中的地址的差值
+*※※*  Parameter:
+*※※*  Parameter:
+*※※*	Parameter:
+*※※*	Author:		    LCH
+*/////////////////////////////////////////////////////////////////;
+//#ifdef _WIN64
+void PE::PerformBaseRelocation(POINTER_TYPE buff, POINTER_TYPE Value)
 {
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)buff;
 	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(buff + pDosHeader->e_lfanew);
@@ -94,7 +122,18 @@ VOID PeOperation::PerformBaseRelocation(POINTER_TYPE buff, POINTER_TYPE Value)
 
 }
 
-BOOL PeOperation::RebuildImportTable(POINTER_TYPE buff)
+/*////////////////////////////////////////////////////////////////
+*※※*  FullName:	RebuildImportTable
+*※※*  功能	:	修复IAT表
+*※※*  Returns:	成功返回1，失败返回0
+*※※*  Parameter:	char* buff，PE文件在内存中的地址(拉伸后)
+*※※*  Parameter:
+*※※*  Parameter:
+*※※*  Parameter:
+*※※*	Parameter:
+*※※*	Author:		    LCH
+*/////////////////////////////////////////////////////////////////;
+BOOL PE::RebuildImportTable(POINTER_TYPE buff)
 {
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)buff;
 	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(buff + pDosHeader->e_lfanew);
@@ -152,9 +191,180 @@ BOOL PeOperation::RebuildImportTable(POINTER_TYPE buff)
 	return result;
 }
 
-BOOL PeOperation::LoadPeFile(LPCSTR FileName, _Out_ PEInformation* pPEInfor)
+/*////////////////////////////////////////////////////////////////
+*※※*  FullName:		StretchFile
+*※※*  功能	:		拉伸文件
+*※※*  Returns:		成功返回新地址，失败返回0
+*※※*  Parameter_1:	pFileBuff，模块地址
+*※※*  Parameter_2:	FileSize,镜像大小
+*※※*  Parameter_3:
+*※※*  Parameter_4:
+*※※*	Parameter_5:
+*※※*	Author:		    LCH
+*/////////////////////////////////////////////////////////////////;
+POINTER_TYPE PE::StretchFile(POINTER_TYPE pFileBuff, DWORD FileSize)
 {
-	HANDLE hFileHandle = CreateFileA(FileName, GENERIC_READ, NULL,
+
+	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFileBuff;
+	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(pFileBuff + pDosHeader->e_lfanew);
+
+	//1.1 根据内存大小 申请内存
+	//char* NewFileBuff = new char[FileSize];
+	char* NewFileBuff = m_alloc.auto_malloc<CHAR*>(FileSize);
+	if (NewFileBuff == NULL)
+	{
+		printf("内存申请失败!");
+		return 0;
+	}
+	memset(NewFileBuff, 0, FileSize);
+
+	//1.2 拉伸文件
+	 // 拷贝DOS头 + DOS STUB + PE头到headers地址处
+	memcpy(NewFileBuff, pDosHeader, pNtHeader->OptionalHeader.SizeOfHeaders);
+
+	// 从dll文件内容中拷贝每个section（节）的数据到新的内存区域
+	PIMAGE_OPTIONAL_HEADER OptionalHeader = (PIMAGE_OPTIONAL_HEADER)((POINTER_TYPE)pFileBuff + pDosHeader->e_lfanew + 4 + IMAGE_SIZEOF_FILE_HEADER);
+	PIMAGE_SECTION_HEADER pSectionHeader = (PIMAGE_SECTION_HEADER)((POINTER_TYPE)OptionalHeader + pNtHeader->FileHeader.SizeOfOptionalHeader);
+
+	for (int i = 0; i < pNtHeader->FileHeader.NumberOfSections; i++, pSectionHeader++)
+	{
+		char* x = (char*)NewFileBuff + pSectionHeader->VirtualAddress;
+		char* y = (char*)pFileBuff + pSectionHeader->PointerToRawData;
+		memcpy(x, y, pSectionHeader->SizeOfRawData);
+	}
+
+	return (POINTER_TYPE)NewFileBuff;
+}
+
+/*////////////////////////////////////////////////////////////////
+*※※*  FullName:		ImageBuff_To_FileBuff - 把PE文件还原成文件磁盘大小
+*※※*  Returns:		成功返回新地址，失败返回0
+*※※*  Parameter_1:	imgbuffer，模块地址
+*※※*  Parameter_2:	length，文件大小
+*※※*  Parameter_3:
+*※※*  Parameter_4:
+*※※*	Parameter_5:
+*※※*	Author:		    LCH
+*/////////////////////////////////////////////////////////////////;
+char* PE::ImageBuff_To_FileBuff(char* imgbuffer, DWORD length)
+{
+	auto tmp = new BYTE[100];
+
+	char* pFileBuffer = NULL;
+	//LPVOID pImageBuffer = NULL;
+	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)imgbuffer;
+	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)((ULONG_PTR)imgbuffer + pDosHeader->e_lfanew);
+	PIMAGE_OPTIONAL_HEADER OptionalHeader = (PIMAGE_OPTIONAL_HEADER)((ULONG_PTR)imgbuffer + pDosHeader->e_lfanew + 4 + IMAGE_SIZEOF_FILE_HEADER);
+	PIMAGE_SECTION_HEADER pSectionHeader = (PIMAGE_SECTION_HEADER)((ULONG_PTR)OptionalHeader + pNtHeader->FileHeader.SizeOfOptionalHeader);
+
+	PIMAGE_SECTION_HEADER pSec_temp;
+	//计算还原后文件的大小( = 计算最后一节的文件偏移 + 文件对齐后的大小)
+	for (int i = 0; i < pNtHeader->FileHeader.NumberOfSections; i++)
+	{
+		pSec_temp = pSectionHeader + i;
+		if (pNtHeader->FileHeader.NumberOfSections - 1 == i)
+			length = pSec_temp->PointerToRawData + pSec_temp->SizeOfRawData;//更新文件的长度
+	}
+
+	auto tet = new std::string("ssss");
+	auto ww = new BYTE[100];
+
+	//pFileBuffer = new char[length];
+	pFileBuffer = m_alloc.auto_malloc<CHAR*>(length);
+
+
+	if (pFileBuffer == NULL)
+	{
+		printf("内存申请失败!");
+		return 0;
+	}
+	memset(pFileBuffer, 0, length);
+	memcpy(pFileBuffer, imgbuffer, OptionalHeader->SizeOfHeaders);
+	for (int i = 0; i < pNtHeader->FileHeader.NumberOfSections; i++, pSectionHeader++)
+	{
+		char* x = (char*)pFileBuffer + pSectionHeader->PointerToRawData;
+		char* y = (char*)imgbuffer + pSectionHeader->VirtualAddress;
+		memcpy(x, y, pSectionHeader->SizeOfRawData);
+	}
+
+	return pFileBuffer;
+
+}
+
+
+
+/*////////////////////////////////////////////////////////////////
+*※※*  FullName:		GET_HEADER_DICTIONARY
+*※※*  功能	:		获取目录表的地址
+*※※*  Returns:		成功则返回要查询的那张目录表的内存偏移,表为空则返回0
+*※※*  Parameter_1:	module，模块的首地址
+*※※*  Parameter_2:	idx,查表的下标
+*※※*  Parameter_3:
+*※※*  Parameter_4:
+*※※*	Parameter_5:
+*※※*	Author:		    LCH
+*/////////////////////////////////////////////////////////////////;
+DWORD PE::GET_HEADER_DICTIONARY(POINTER_TYPE module, int idx)
+{
+
+	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)module;
+	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(module + pDosHeader->e_lfanew);
+
+	//获取目录表头指针
+	PIMAGE_DATA_DIRECTORY pDataDirectory = pNtHeader->OptionalHeader.DataDirectory;
+	if (pDataDirectory[idx].VirtualAddress == 0)
+	{
+		return 0;
+	}
+	DWORD res = pDataDirectory[idx].VirtualAddress;
+
+	return res;
+}
+
+
+/*////////////////////////////////////////////////////////////////
+*※※*  FullName:		GetPEInformation_
+*※※*  功能	:		打开一个文件，拷贝进内存，获取PE文件的各种信息
+*※※*  Returns:		成功返回1，失败返回0
+*※※*  Parameter_1:	FilePath,文件路径
+*※※*  Parameter_2:	pPEInfor，输出参数,把得到的PE信息存放到pPEInfor结构体里
+*※※*  Parameter_3:
+*※※*  Parameter_4:
+*※※*	Parameter_5:
+*※※*	Author:		    LCH
+*/////////////////////////////////////////////////////////////////;
+bool PE::GetPEInformation_(TCHAR* FilePath, _Out_ PEInformation* pPEInfor)
+{
+
+	//------------------------------------------------------------------------------------
+		////1.1 获取文件句柄
+		//HANDLE hFile = CreateFile(
+		//	FilePath,
+		//	GENERIC_READ,
+		//	0,
+		//	NULL,
+		//	OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+		////1.2 获取文件大小
+		//DWORD dwFileSize = GetFileSize(hFile, NULL);
+		////CHAR *pFileBuf = new CHAR[dwFileSize];
+
+		//CHAR *pFileBuf = m_alloc.auto_malloc<CHAR*>(dwFileSize);
+		//memset(pFileBuf, 0, dwFileSize);
+
+		////1.3 将文件读取到内存
+		//DWORD ReadSize = 0;
+		//ReadFile(hFile, pFileBuf, dwFileSize, (LPDWORD)&ReadSize, NULL);
+
+		////1.4 关闭句柄
+		//CloseHandle(hFile);
+	//-----------------------------------------------------------------------------
+
+
+	/////////////////////////////////////////////////////////////
+
+
+	HANDLE hFileHandle = CreateFile(FilePath, GENERIC_READ, NULL,
 		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
 	if (hFileHandle == INVALID_HANDLE_VALUE) {
@@ -171,38 +381,38 @@ BOOL PeOperation::LoadPeFile(LPCSTR FileName, _Out_ PEInformation* pPEInfor)
 		return FALSE;
 	}
 
-	auto pFileBase = (POINTER_TYPE)calloc(pFileSize, sizeof(BYTE));
+	auto pFileBuf = (POINTER_TYPE)calloc(pFileSize, sizeof(BYTE));
 
 	// 将目标文件的内容读取到创建的缓冲区中
 	DWORD Read = 0;
-	ReadFile(hFileHandle, (LPVOID)pFileBase, pFileSize, &Read, NULL);
+	ReadFile(hFileHandle, (LPVOID)pFileBuf, pFileSize, &Read, NULL);
 
 	// 为了防止句柄泄露应该关闭句柄
 	CloseHandle(hFileHandle);
 
 	//2.1 判断是否为PE文件
-	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)(pFileBase) ;
+	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFileBuf;
 	if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
 	{
 		MessageBoxA(NULL, "不是MZ开头", "提示", MB_OK);
-		return FALSE;
+		return 0;
 	}
-	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(pFileBase + pDosHeader->e_lfanew);
-	PIMAGE_OPTIONAL_HEADER OptionalHeader = (PIMAGE_OPTIONAL_HEADER)((POINTER_TYPE)pFileBase + pDosHeader->e_lfanew + 4 + IMAGE_SIZEOF_FILE_HEADER);
+	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(pFileBuf + pDosHeader->e_lfanew);
+	PIMAGE_OPTIONAL_HEADER OptionalHeader = (PIMAGE_OPTIONAL_HEADER)((POINTER_TYPE)pFileBuf + pDosHeader->e_lfanew + 4 + IMAGE_SIZEOF_FILE_HEADER);
 	PIMAGE_SECTION_HEADER pSectionHeader = (PIMAGE_SECTION_HEADER)((POINTER_TYPE)OptionalHeader + pNtHeader->FileHeader.SizeOfOptionalHeader);
 
 	if (pNtHeader->Signature != IMAGE_NT_SIGNATURE)
 	{
 		MessageBoxA(NULL, "不是PE文件", "提示", MB_OK);
-		return FALSE;
+		return 0;
 	}
 
-	
-
-	pPEInfor->FileBase = (POINTER_TYPE)pFileBase;
+	//2.2 把PE信息存入PEInformation结构体里
+	pPEInfor->FileBuffer = (POINTER_TYPE)pFileBuf;
 	pPEInfor->FileSize = pFileSize;
 	pPEInfor->AddressOfEntryPoint = pNtHeader->OptionalHeader.AddressOfEntryPoint;
 	pPEInfor->BaseOfCode = pNtHeader->OptionalHeader.BaseOfCode;
+
 #ifdef _WIN64
 
 #else
@@ -223,11 +433,87 @@ BOOL PeOperation::LoadPeFile(LPCSTR FileName, _Out_ PEInformation* pPEInfor)
 	pPEInfor->SizeofImage = pNtHeader->OptionalHeader.SizeOfImage;
 	pPEInfor->SizeOfOptionHeaders = pNtHeader->FileHeader.SizeOfOptionalHeader;
 
-	return TRUE;
+	return 1;
 }
 
-BOOL PeOperation::addSeciton(POINTER_TYPE pFileBuff, DWORD AddSize, char secname[8])
+/*////////////////////////////////////////////////////////////////
+*※※*  FullName:		GetPEInformation_1
+*※※*  功能	:		根据内存模块，获取PE文件的各种信息
+*※※*  Returns:		成功返回1，失败返回0
+*※※*  Parameter_1:	pFilebuff，模块的地址
+*※※*  Parameter_2:	pPEInfor，输出参数，把得到的PE信息存放到pPEInfor结构体里
+*※※*  Parameter_3:	dwFileSize，模块大小
+*※※*  Parameter_4:
+*※※*	Parameter_5:
+*※※*	Author:		    LCH
+*/////////////////////////////////////////////////////////////////;
+bool PE::GetPEInformation_1(char* pFilebuff, PEInformation* pPEInfor, DWORD dwFileSize)
 {
+	//2.1 判断是否为PE文件
+	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFilebuff;
+	if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+	{
+		MessageBoxA(NULL, "不是MZ开头", "提示", MB_OK);
+		return 0;
+	}
+	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(pFilebuff + pDosHeader->e_lfanew);
+	PIMAGE_OPTIONAL_HEADER OptionalHeader = (PIMAGE_OPTIONAL_HEADER)((POINTER_TYPE)pFilebuff + pDosHeader->e_lfanew + 4 + IMAGE_SIZEOF_FILE_HEADER);
+	PIMAGE_SECTION_HEADER pSectionHeader = (PIMAGE_SECTION_HEADER)((POINTER_TYPE)OptionalHeader + pNtHeader->FileHeader.SizeOfOptionalHeader);
+	if (pNtHeader->Signature != IMAGE_NT_SIGNATURE)
+	{
+		MessageBoxA(NULL, "不是PE文件", "提示", MB_OK);
+		return 0;
+	}
+
+	//2.2 把PE信息存入PEInformation结构体里
+	pPEInfor->FileBuffer = (POINTER_TYPE)pFilebuff;
+	pPEInfor->FileSize = dwFileSize;
+	pPEInfor->AddressOfEntryPoint = pNtHeader->OptionalHeader.AddressOfEntryPoint;
+	pPEInfor->BaseOfCode = pNtHeader->OptionalHeader.BaseOfCode;
+
+#ifdef _WIN64
+
+#else
+	pPEInfor->BaseOfData = pNtHeader->OptionalHeader.BaseOfData;
+#endif
+
+	pPEInfor->pNtHeader = pNtHeader;
+	pPEInfor->OptionalHeader = OptionalHeader;
+	pPEInfor->pSectionHeader = pSectionHeader;
+	pPEInfor->DataDirectory = pNtHeader->OptionalHeader.DataDirectory;
+	pPEInfor->e_lfanes = pDosHeader->e_lfanew;
+	pPEInfor->FileAlignment = pNtHeader->OptionalHeader.FileAlignment;
+	pPEInfor->ImageBase = pNtHeader->OptionalHeader.ImageBase;
+	pPEInfor->NumberOfSections = pNtHeader->FileHeader.NumberOfSections;
+	pPEInfor->SectionAlignment = pNtHeader->OptionalHeader.SectionAlignment;
+	pPEInfor->SizeOfCode = pNtHeader->OptionalHeader.SizeOfCode;
+	pPEInfor->SizeOfHeaders = pNtHeader->OptionalHeader.SizeOfHeaders;
+	pPEInfor->SizeofImage = pNtHeader->OptionalHeader.SizeOfImage;
+	pPEInfor->SizeOfOptionHeaders = pNtHeader->FileHeader.SizeOfOptionalHeader;
+
+	return 1;
+}
+
+
+
+/*////////////////////////////////////////////////////////////////
+*※※*  FullName:		addSeciton
+*※※*  功能	:		添加新节
+*※※*  Returns:		成功返回1，失败返回0
+*※※*  Parameter_1:	pFileBuff，模块地址
+*※※*  Parameter_2:	AddSize，要添加的大小
+*※※*  Parameter_3:	secname，新节名称，限制在八个字节内
+*※※*  Parameter_4:
+*※※*	Parameter_5:
+*※※*	Author:		    LCH
+*/////////////////////////////////////////////////////////////////;
+bool PE::addSeciton(POINTER_TYPE pFileBuff, DWORD AddSize, char secname[8])
+{
+	/*if (secname[7] !=0xCC)
+	{
+		MessageBoxA(NULL, "新节的名称超出8个字节\r\n新节添加失败!", "提示", MB_ICONWARNING);
+		return false;
+	}*/
 
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFileBuff;
 	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(pFileBuff + pDosHeader->e_lfanew);
@@ -301,135 +587,3 @@ BOOL PeOperation::addSeciton(POINTER_TYPE pFileBuff, DWORD AddSize, char secname
 	return true;
 }
 
-DWORD PeOperation::GET_HEADER_DICTIONARY(POINTER_TYPE module, int idx)
-{
-	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)module;
-	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(module + pDosHeader->e_lfanew);
-
-	//获取目录表头指针
-	PIMAGE_DATA_DIRECTORY pDataDirectory = pNtHeader->OptionalHeader.DataDirectory;
-	if (pDataDirectory[idx].VirtualAddress == 0)
-	{
-		return 0;
-	}
-	DWORD res = pDataDirectory[idx].VirtualAddress;
-
-	return res;
-}
-
-POINTER_TYPE PeOperation::StretchFile(POINTER_TYPE pFileBuff, DWORD FileSize)
-{
-
-	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFileBuff;
-	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(pFileBuff + pDosHeader->e_lfanew);
-
-	//1.1 根据内存大小 申请内存
-	//char* NewFileBuff = new char[FileSize];
-	char* NewFileBuff = m_alloc.auto_malloc<CHAR*>(FileSize);
-	if (NewFileBuff == NULL)
-	{
-		printf("内存申请失败!");
-		return 0;
-	}
-	memset(NewFileBuff, 0, FileSize);
-
-	//1.2 拉伸文件
-	 // 拷贝DOS头 + DOS STUB + PE头到headers地址处
-	memcpy(NewFileBuff, pDosHeader, pNtHeader->OptionalHeader.SizeOfHeaders);
-
-	// 从dll文件内容中拷贝每个section（节）的数据到新的内存区域
-	PIMAGE_OPTIONAL_HEADER OptionalHeader = (PIMAGE_OPTIONAL_HEADER)((POINTER_TYPE)pFileBuff + pDosHeader->e_lfanew + 4 + IMAGE_SIZEOF_FILE_HEADER);
-	PIMAGE_SECTION_HEADER pSectionHeader = (PIMAGE_SECTION_HEADER)((POINTER_TYPE)OptionalHeader + pNtHeader->FileHeader.SizeOfOptionalHeader);
-
-	for (int i = 0; i < pNtHeader->FileHeader.NumberOfSections; i++, pSectionHeader++)
-	{
-		char* x = (char*)NewFileBuff + pSectionHeader->VirtualAddress;
-		char* y = (char*)pFileBuff + pSectionHeader->PointerToRawData;
-		memcpy(x, y, pSectionHeader->SizeOfRawData);
-	}
-
-	return (POINTER_TYPE)NewFileBuff;
-}
-
-char* PeOperation::ImageBuff_To_FileBuff(char* imgbuffer, DWORD length)
-{
-	char* pFileBuffer = NULL;
-	//LPVOID pImageBuffer = NULL;
-	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)imgbuffer;
-	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)((ULONG_PTR)imgbuffer + pDosHeader->e_lfanew);
-	PIMAGE_OPTIONAL_HEADER OptionalHeader = (PIMAGE_OPTIONAL_HEADER)((ULONG_PTR)imgbuffer + pDosHeader->e_lfanew + 4 + IMAGE_SIZEOF_FILE_HEADER);
-	PIMAGE_SECTION_HEADER pSectionHeader = (PIMAGE_SECTION_HEADER)((ULONG_PTR)OptionalHeader + pNtHeader->FileHeader.SizeOfOptionalHeader);
-
-	PIMAGE_SECTION_HEADER pSec_temp;
-	//计算还原后文件的大小( = 计算最后一节的文件偏移 + 文件对齐后的大小)
-	for (int i = 0; i < pNtHeader->FileHeader.NumberOfSections; i++)
-	{
-		pSec_temp = pSectionHeader + i;
-		if (pNtHeader->FileHeader.NumberOfSections - 1 == i)
-			length = pSec_temp->PointerToRawData + pSec_temp->SizeOfRawData;//更新文件的长度
-	}
-	//pFileBuffer = new char[length];
-	pFileBuffer = m_alloc.auto_malloc<CHAR*>(length);
-	if (pFileBuffer == NULL)
-	{
-		printf("内存申请失败!");
-		return 0;
-	}
-	memset(pFileBuffer, 0, length);
-	memcpy(pFileBuffer, imgbuffer, OptionalHeader->SizeOfHeaders);
-	for (int i = 0; i < pNtHeader->FileHeader.NumberOfSections; i++, pSectionHeader++)
-	{
-		char* x = (char*)pFileBuffer + pSectionHeader->PointerToRawData;
-		char* y = (char*)imgbuffer + pSectionHeader->VirtualAddress;
-		memcpy(x, y, pSectionHeader->SizeOfRawData);
-	}
-
-	return pFileBuffer;
-}
-
-BOOL PeOperation::GetPEInformation_1(char* pFilebuff, PEInformation* pPEInfor, DWORD dwFileSize)
-{
-	//2.1 判断是否为PE文件
-	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFilebuff;
-	if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
-	{
-		MessageBoxA(NULL, "不是MZ开头", "提示", MB_OK);
-		return 0;
-	}
-	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(pFilebuff + pDosHeader->e_lfanew);
-	PIMAGE_OPTIONAL_HEADER OptionalHeader = (PIMAGE_OPTIONAL_HEADER)((POINTER_TYPE)pFilebuff + pDosHeader->e_lfanew + 4 + IMAGE_SIZEOF_FILE_HEADER);
-	PIMAGE_SECTION_HEADER pSectionHeader = (PIMAGE_SECTION_HEADER)((POINTER_TYPE)OptionalHeader + pNtHeader->FileHeader.SizeOfOptionalHeader);
-	if (pNtHeader->Signature != IMAGE_NT_SIGNATURE)
-	{
-		MessageBoxA(NULL, "不是PE文件", "提示", MB_OK);
-		return 0;
-	}
-
-	//2.2 把PE信息存入PEInformation结构体里
-	pPEInfor->FileBase = (POINTER_TYPE)pFilebuff;
-	pPEInfor->FileSize = dwFileSize;
-	pPEInfor->AddressOfEntryPoint = pNtHeader->OptionalHeader.AddressOfEntryPoint;
-	pPEInfor->BaseOfCode = pNtHeader->OptionalHeader.BaseOfCode;
-
-#ifdef _WIN64
-
-#else
-	pPEInfor->BaseOfData = pNtHeader->OptionalHeader.BaseOfData;
-#endif
-
-	pPEInfor->pNtHeader = pNtHeader;
-	pPEInfor->OptionalHeader = OptionalHeader;
-	pPEInfor->pSectionHeader = pSectionHeader;
-	pPEInfor->DataDirectory = pNtHeader->OptionalHeader.DataDirectory;
-	pPEInfor->e_lfanes = pDosHeader->e_lfanew;
-	pPEInfor->FileAlignment = pNtHeader->OptionalHeader.FileAlignment;
-	pPEInfor->ImageBase = pNtHeader->OptionalHeader.ImageBase;
-	pPEInfor->NumberOfSections = pNtHeader->FileHeader.NumberOfSections;
-	pPEInfor->SectionAlignment = pNtHeader->OptionalHeader.SectionAlignment;
-	pPEInfor->SizeOfCode = pNtHeader->OptionalHeader.SizeOfCode;
-	pPEInfor->SizeOfHeaders = pNtHeader->OptionalHeader.SizeOfHeaders;
-	pPEInfor->SizeofImage = pNtHeader->OptionalHeader.SizeOfImage;
-	pPEInfor->SizeOfOptionHeaders = pNtHeader->FileHeader.SizeOfOptionalHeader;
-
-	return 1;
-}

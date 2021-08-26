@@ -9,7 +9,7 @@ class AllocMemory
 public:
 	virtual ~AllocMemory()
 	{
-		/*for (int i = 0; i < p.size(); i++)
+		for (int i = 0; i < p.size(); i++)
 		{
 			if (p[i] == 0)
 			{
@@ -18,7 +18,7 @@ public:
 			free(p[i]);
 			p[i] = 0;
 		}
-		p.clear();*/
+		p.clear();
 	}
 
 public:

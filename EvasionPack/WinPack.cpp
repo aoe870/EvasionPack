@@ -16,11 +16,11 @@ BYTE byXor = 0x15;
 #ifdef _WIN64
 	TCHAR szProxyAddr[100] = L"../output/x64/demo_pack_X64.exe";
 
-	std::string path = "../output/demoX64.exe";
+	TCHAR strPath[] = L"../output/shell64.exe";
 #else
 	TCHAR szProxyAddr[100] = L"../output/32/demo_pack.exe";
 
-	std::string path = "../output/demo.exe";
+	TCHAR strPath = L"../output/demo.exe";
 #endif
 
 WinPack::WinPack()
@@ -29,42 +29,81 @@ WinPack::WinPack()
 	/*----------------------------------------------------------------------------------*/
 	/*	1、加载被加壳程序，处理IAT表和反调试											*/
 	/*----------------------------------------------------------------------------------*/
+		//1.0 获取目标文件PE信息
+	PEInfo peinfo;
+	PE pe;
+	pe.GetPEInformation_(strPath, &peinfo);
 
-
-	PEInformation PEinfo;
-	PeOperation pe;
-	pe.LoadPeFile(path.c_str(), &PEinfo);
-
-	if (!pe.IsPEFile((UCHAR*)PEinfo.FileBase)) {
+	// 判断是否是PE文件
+	if (FALSE == pe.IsPEFile((UCHAR*)peinfo.FileBuffer))
+	{
 		return;
-	}
+	};
 
 	//1.1 拉伸目标文件
-	ULONG_PTR TempBuff = pe.StretchFile(PEinfo.FileBase, PEinfo.SizeofImage);
+	ULONG_PTR TempBuff = pe.StretchFile(peinfo.FileBuffer, peinfo.SizeofImage);
 
-	//1.2.0 保存IAT表
-//	SaveImportTab((char*)TempBuff);
-	//1.2.1 清理IAT表
-//	ClearImportTab((char*)TempBuff);
+	PROTECTOR pProctect;
+	pProctect.EncryptionIAT = false;
+	pProctect.AddReDebug = false;
 
+
+	//1.2 判断IAT加密复选框是否被选中
+	if (pProctect.EncryptionIAT)
+	{
+		//1.2.0 保存IAT表
+		SaveImportTab((char*)TempBuff);
+		//1.2.1 清理IAT表
+		ClearImportTab((char*)TempBuff);
+	}
+
+	//1.3 判断反调试复选框是否被选中
+	if (pProctect.AddReDebug)
+	{
+		PEInfo peinfo_debug;
+		//更新peinfo_debug信息
+		pe.GetPEInformation_1((char*)TempBuff, &peinfo_debug);
+		//绑定机器码
+		XorMachineCode(GetCPUID(), peinfo_debug);
+		//更多反调试方法在stub.dll的PreventDebug类里
+	}
+
+	//1.4 获取IAT表信息和重定位信息
 	getinfo((char*)TempBuff);
 
 	//1.5 把拉伸的文件还原成磁盘大小
-	ULONG_PTR TempBuff_1 = (ULONG_PTR)pe.ImageBuff_To_FileBuff((char*)TempBuff, PEinfo.FileSize);
+	ULONG_PTR TempBuff_1 = (ULONG_PTR)pe.ImageBuff_To_FileBuff((char*)TempBuff, peinfo.FileSize);
 
 	//1.6 更新peinfo信息
-	pe.GetPEInformation_1((char*)TempBuff_1, &PEinfo, PEinfo.FileSize);
+	pe.GetPEInformation_1((char*)TempBuff_1, &peinfo, peinfo.FileSize);
 
 	//1.7 加密代码段
-//	DWORD dwVirtualAddr = XorCode(byXor, PEinfo);
+	DWORD dwVirtualAddr = XorCode(byXor, peinfo);
 
 	//----去掉随机加载基址----
-	PEinfo.OptionalHeader->DllCharacteristics = 0;
+	peinfo.OptionalHeader->DllCharacteristics = 0;
 
 	/*----------------------------------------------------------------------------------*/
 	/* 2、获取Stub文件的PE信息，将必要的信息设置到Stub中								*/
 	/*----------------------------------------------------------------------------------*/
+		//2.1 加载Stub.dll
+#ifdef _WIN64	
+#ifdef UNICODE
+	//HMODULE hModule = LoadLibrary(L"../Stub/x64/Release/Stub.dll");
+#else
+	//HMODULE hModule = LoadLibrary("../Stub/x64/Release/Stub.dll");
+#endif // UNICODE
 
+
+#else
+
+#ifdef UNICODE
+	//HMODULE hModule = LoadLibrary(L"../Stub/Release/Stub.dll");
+#else
+	//HMODULE hModule = LoadLibrary("../Stub/Release/Stub.dll");
+#endif // UNICODE
+
+#endif
 	HMODULE hModule = LoadLibrary(L"EvasionPackDll.dll");
 	if (NULL == hModule) hModule = LoadLibrary(L"EvasionPackDll.dll");
 
@@ -72,17 +111,18 @@ WinPack::WinPack()
 	{
 		MessageBoxA(NULL, "Stub.dll加载失败，请检查路径", "提示", MB_OK);
 		return;
-	} 
+	}
 
+	//2.2 把相关信息保存Stub.dll的g_stcParam全局变量里
+	//HMODULE 
 	PGLOBAL_PARAM pstcParam = (PGLOBAL_PARAM)GetProcAddress(hModule, "g_stcParam");
 
-
-	pstcParam->dwImageBase = PEinfo.ImageBase;
-	pstcParam->dwCodeSize = PEinfo.SizeOfCode;
-	pstcParam->ulBaseOfCode = PEinfo.BaseOfCode;
-	pstcParam->dwOEP = PEinfo.AddressOfEntryPoint;
+	pstcParam->dwImageBase = peinfo.ImageBase;
+	pstcParam->dwCodeSize = peinfo.SizeOfCode;
+	pstcParam->ulBaseOfCode = peinfo.BaseOfCode;
+	pstcParam->dwOEP = peinfo.AddressOfEntryPoint;
 	pstcParam->byXor = byXor;
-//	pstcParam->lpStartVA = (PBYTE)dwVirtualAddr;
+	pstcParam->lpStartVA = (PBYTE)dwVirtualAddr;
 
 	//保存IAT的信息到Stub.dll的g_stcParam全局变量里
 	pstcParam->stcPEImportDir = m_PEImportDir;
@@ -93,13 +133,15 @@ WinPack::WinPack()
 	pstcParam->dwSizeOfModBuf = m_dwSizeOfModBuf;
 
 	pstcParam->dwSizeOfFunBuf = m_dwSizeOfFunBuf;
+	pstcParam->pProctect.EncryptionIAT = pProctect.EncryptionIAT;
+	pstcParam->pProctect.AddReDebug = pProctect.AddReDebug;
 
 	//2.3 添加Stub代码段到被加壳程序中
 	//2.3.1 读取Stub代码段
 	AllocMemory m_alloc;
 	MODULEINFO modinfo = { 0 };
 	GetModuleInformation(GetCurrentProcess(), hModule, &modinfo, sizeof(MODULEINFO));
-	pstcParam->dwIATBaseRVA = PEinfo.SizeofImage + modinfo.SizeOfImage;
+	pstcParam->dwIATBaseRVA = peinfo.SizeofImage + modinfo.SizeOfImage;
 	PBYTE lpMod = m_alloc.auto_malloc<PBYTE>(modinfo.SizeOfImage);
 	memcpy_s(lpMod, modinfo.SizeOfImage, hModule, modinfo.SizeOfImage);
 	PEInfo stubpeinfo;
@@ -107,8 +149,8 @@ WinPack::WinPack()
 
 
 	//2.3.2 修复重定位表
-	ULONG_PTR TarSizeofImage = pe.Alignment(PEinfo.SizeofImage, PEinfo.OptionalHeader->SectionAlignment);
-	ULONG_PTR value = stubpeinfo.ImageBase - (PEinfo.OptionalHeader->ImageBase + TarSizeofImage);
+	ULONG_PTR TarSizeofImage = pe.AlignSize(peinfo.SizeofImage, peinfo.OptionalHeader->SectionAlignment);
+	ULONG_PTR value = stubpeinfo.ImageBase - (peinfo.OptionalHeader->ImageBase + TarSizeofImage);
 
 	if (value != 0)
 	{
@@ -116,28 +158,26 @@ WinPack::WinPack()
 	}
 
 	//2.3.3 修改被加壳程序的OEP，指向stub
-	PEinfo.OptionalHeader->AddressOfEntryPoint = TarSizeofImage + (pstcParam->dwStart - (ULONG_PTR)hModule);
+	peinfo.OptionalHeader->AddressOfEntryPoint = TarSizeofImage + (pstcParam->dwStart - (ULONG_PTR)hModule);
 
 	//2.3.4 添加新节存放Stub.dll
-	pe.addSeciton(PEinfo.FileBase, stubpeinfo.SizeofImage, (char*)".vmp0");
+	pe.addSeciton(peinfo.FileBuffer, stubpeinfo.SizeofImage, (char*)".vmp0");
+
 
 	/*----------------------------------------------------------------------------------*/
 	/*	3、合并目标PE和Stub.dll以及把处理好的文件存盘									*/
 	/*----------------------------------------------------------------------------------*/
-
 		//3.0 合并目标PE和Stub.dll
-	PBYTE NewBuffer = MergeSection(PEinfo, stubpeinfo, lpMod, byXor);
+	PBYTE NewBuffer = MergeSection(peinfo, stubpeinfo, lpMod, byXor);
 
 	//3.1 清除不需要的目录信息
 	ClearDirTable((char*)NewBuffer);
-
-
 
 	//3.2 保存文件
 	SaveFile_pack(szProxyAddr, (char*)NewBuffer, m_uTotalSize);
 
 	//3.3 释放Stub.dll
-//	FreeLibrary(hModule);
+	FreeLibrary(hModule);
 	return;
 }
 
@@ -148,7 +188,7 @@ void WinPack::StartProtect(HWND hwndDlg, TCHAR* strPath, BYTE byXor, PROTECTOR p
 void WinPack::XorMachineCode(ULONGLONG cpuId, PEInfo& peinfo)
 {
 	//获取被加壳程序的OEP
-	ULONG_PTR uCodeBase = peinfo.FileBase + peinfo.AddressOfEntryPoint;
+	ULONG_PTR uCodeBase = peinfo.FileBuffer + peinfo.AddressOfEntryPoint;
 
 	//与代码段进行亦或
 	*(ULONGLONG*)uCodeBase ^= cpuId;
@@ -175,7 +215,7 @@ DWORD WinPack::XorCode(BYTE byXOR, PEInfo peinfo)
 	}
 
 	//在内存中找到代码段的相对偏移位置
-	PBYTE pBase = (PBYTE)(Temp->PointerToRawData + (ULONGLONG)peinfo.FileBase);
+	PBYTE pBase = (PBYTE)(Temp->PointerToRawData + (ULONGLONG)peinfo.FileBuffer);
 
 	//做异或运算加密
 	for (int i = 0; i < peinfo.SizeOfCode; i++)
@@ -220,7 +260,7 @@ void WinPack::getinfo(char* m_pFileBuf)
 void WinPack::SaveImportTab(char* m_pFileBuf)
 {
 	//0.获取导入表结构体指针
-	PeOperation pe; 
+	PE pe; 
 	DWORD Virtual = pe.GET_HEADER_DICTIONARY((ULONG_PTR)m_pFileBuf, 1);
 	if (Virtual == 0)
 	{
@@ -333,7 +373,7 @@ void WinPack::SaveImportTab(char* m_pFileBuf)
 
 void WinPack::ClearImportTab(char* m_pFileBuf)
 {
-	PeOperation pe;
+	PE pe;
 	DWORD DirData = pe.GET_HEADER_DICTIONARY((ULONG_PTR)m_pFileBuf, 1);
 	//1、获取导入表结构体指针
 	PIMAGE_IMPORT_DESCRIPTOR pPEImport =
@@ -403,7 +443,7 @@ void WinPack::ClearDirTable(char* filebuff)
 
 PBYTE WinPack::MergeSection(PEInfo peinfo, PEInfo stubpeinfo, PBYTE lpMod, BYTE byXor)
 {
-	PeOperation pe;
+	PE pe;
 	//1、 计算保存IAT所用的空间大小
 	DWORD dwIATSize = 0;
 	dwIATSize = m_dwSizeOfModBuf + m_dwSizeOfFunBuf + m_dwNumOfIATFuns * sizeof(MYIMPORT);
@@ -415,15 +455,15 @@ PBYTE WinPack::MergeSection(PEInfo peinfo, PEInfo stubpeinfo, PBYTE lpMod, BYTE 
 	if (dwIATSize != 0)
 	{
 		//添加新节存放IAT表
-		pe.addSeciton(peinfo.FileBase, dwIATSize, (char*)".vmp1");
+		pe.addSeciton(peinfo.FileBuffer, dwIATSize, (char*)".vmp1");
 	}
 
 	//2、 申请新内存合并目标PE和Stub.dll
-	ULONG_PTR TarFileSize = pe.Alignment(peinfo.FileSize, peinfo.OptionalHeader->FileAlignment);//被加壳程序对齐后的文件大小
+	ULONG_PTR TarFileSize = pe.AlignSize(peinfo.FileSize, peinfo.OptionalHeader->FileAlignment);//被加壳程序对齐后的文件大小
 	ULONG_PTR TotalSize = stubpeinfo.SizeofImage + TarFileSize + dwIATSize;
 	m_uTotalSize = TotalSize;//记录合并后的总大小,保存文件时要用到
 	PBYTE NewBuffer = m_allocMemory.auto_malloc<PBYTE>(TotalSize + 10);
-	memcpy_s(NewBuffer, TarFileSize, (char*)peinfo.FileBase, TarFileSize);
+	memcpy_s(NewBuffer, TarFileSize, (char*)peinfo.FileBuffer, TarFileSize);
 	memcpy_s(NewBuffer + TarFileSize, stubpeinfo.SizeofImage, lpMod, stubpeinfo.SizeofImage);
 
 	//3、如果选择了加密IAT，则把IAT数据到拷贝 '.vmp1' 节
