@@ -1,53 +1,55 @@
 #pragma once
 #include <windows.h>
 
-// 共享数据结构体
-typedef struct _SHAREDATA
+extern "C"
 {
-	long OldOep = 0;// 原始 oep
-	long rva = 0;// 加密的rva
-	long size = 0;// 加密的大小
-	BYTE key = 0;// 加密的 key
-	long oldRelocRva = 0;// 原始重定位表位置
-	long oldImageBase = 0;// 原始加载基址
+	typedef struct _MYIMPORT
+	{
 
-	DWORD FrontCompressRva;//0
-	DWORD FrontCompressSize;//1
-	DWORD LaterCompressSize;//2
-
-	unsigned char key1[16] = {};//解密密钥
-	int index = 0;			  //加密的区段数量 用的时候需要-1
-	int data[20][2];  //加密的区段RVA和Size	
-
-	int index2 = 0;			  //加密的区段数量 用的时候需要-1
-	int data2[20][3];  //加密的区段RVA和Size
-
-	DWORD dwDataDir[20][2];  //数据目录表的RVA和Size	
-	DWORD dwNumOfDataDir;	//数据目录表的个数
-
-	long ImportRva;
+		ULONG_PTR	m_dwIATAddr;			//IAT地址
+		ULONG_PTR	m_dwModNameRVA;			//模块名偏移
+		ULONG_PTR	m_dwFunNameRVA;			//函数名偏移
+		BOOL		m_bIsOrdinal;			//是否为序号导出函数
+		ULONG_PTR	m_Ordinal;				//序号
+	}MYIMPORT, * PMYIMPORT;
 
 
-	DWORD TlsCallbackFuncRva;
-	bool bIsTlsUseful;
+	typedef struct _PROTECTOR
+	{
+		unsigned  EncryptionIAT : 1;		//是否IAT加密		
+		unsigned  AddReDebug : 1;			//是否增加反调试
+	}PROTECTOR, * pPROTECTOR;
 
-} SHAREDATA, *PSHAREDATA;
 
-// 重定位项结构体
-struct TypeOffset
-{
-	WORD Offset : 12;
-	WORD Type : 4;
-};
+	typedef struct _GLOBAL_PARAM
+	{
+		ULONG_PTR dwStart;		// Stub中的OEP
 
-// 定义全局函数变量
-#define DefApiFun(name)\
-	decltype(name)* My_##name = NULL;
+		BOOL bShowMessage;		// 是否显示解密信息
+		ULONG_PTR dwImageBase;	// 映像基址
+		ULONG_PTR ulBaseOfCode;	//代码基址
+		ULONG_PTR dwOEP;		// 程序入口点
+		PBYTE lpStartVA;		// 起始虚拟地址（被异或加密区）
+		DWORD dwCodeSize;		// 被加密大小
+		BYTE byXor;				// 加密异或的值
 
-// 获取指定API
-#define GetApiFun(mod,name)\
-	decltype(name)* My_##name = (decltype(name)*)My_GetProcAddress(mod,#name)
+		IMAGE_DATA_DIRECTORY	stcPERelocDir;		//重定位表信息
+		IMAGE_DATA_DIRECTORY	stcPEImportDir;		//导入表信息
 
-// 获取指定API
-#define SetAPI(mod,name)\
-		My_##name = (decltype(name)*)MyGetProcAddress(mod,#name)
+		ULONG_PTR					dwIATSectionBase;	//IAT所在段基址
+		DWORD					dwIATSectionSize;	//IAT所在段大小
+
+		//解密IAT所用到的的变量
+		PMYIMPORT				pMyImport;
+		PVOID					pModNameBuf;
+		PVOID					pFunNameBuf;
+		ULONG_PTR					dwNumOfIATFuns;
+		ULONG_PTR					dwSizeOfModBuf;
+		ULONG_PTR					dwSizeOfFunBuf;
+		ULONG_PTR					dwIATBaseRVA;
+
+		PROTECTOR	pProctect;
+	}GLOBAL_PARAM, * PGLOBAL_PARAM;
+
+	void Start();
+}

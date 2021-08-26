@@ -5,565 +5,510 @@
 #include "lz4.h"
 #include "AES.h"
 #include <DbgHelp.h>
-
+#include <Psapi.h>
 #pragma comment(lib, "DbgHelp.lib")
 
 std::vector<std::string> DllNameTable{ "EvasionPackDll.dll" };
 
-WinPack::WinPack(std::string path, std::string fileName)
-{	
+BYTE byXor = 0x15;
 
-	LoadExeFile(path.c_str());
 
-	// 2 添加新区段
-	AddSection(PackTestSection.c_str(), ".text");
-	AddSection(PackRelocName.c_str(), ".reloc");
+#ifdef _WIN64
+	TCHAR szProxyAddr[100] = L"../output/x64/demo_pack_X64.exe";
 
-	// 3 重新设置OEP
-	SetOEP();
+	std::string path = "../output/demoX64.exe";
+#else
+	TCHAR szProxyAddr[100] = L"../output/32/demo_pack.exe";
 
-	// 4 操作导入表
-	//SetClearImport();
+	std::string path = "../output/demo.exe";
+#endif
 
-	// 修复壳重定位	
-	FixReloc();
-
-	// 7 压缩区段
-	CompressSection(DefaultCode);
-
-	// 异或加密
-	EncryptAllSection();
-
-	// 9 填充新区段内容
-	CopySectionData(PackTestSection.c_str(), PackDefaultCode.c_str());
-	CopySectionData(PackRelocName.c_str(), ".reloc");
-
-	// 10 另存为新文件
-	SaveFile(("../output/" + fileName).c_str());
-}
-
-/// <summary>
-/// 内存对齐
-/// </summary>
-/// <param name="n"></param>
-/// <param name="align"></param>
-/// <returns></returns>
-DWORD WinPack::Alignment(DWORD n, DWORD align)
+WinPack::WinPack()
 {
-	return n % align == 0 ? n : (n / align + 1) * align;
-}
 
-/// <summary>
-/// 获取模块表段
-/// </summary>
-/// <param name="Base">模块基址</param>
-/// <param name="SectionName">表块名
-/// </param>
-/// <returns></returns>
-PIMAGE_SECTION_HEADER WinPack::GetSection(DWORD Base, LPCSTR SectionName)
-{
-	// 1. 获取到区段表的第一项
-	auto SectionTable = GET_SECTION_HEADER(Base);
+	/*----------------------------------------------------------------------------------*/
+	/*	1、加载被加壳程序，处理IAT表和反调试											*/
+	/*----------------------------------------------------------------------------------*/
 
-	// 2. 获取到区段表的元素个数
-	WORD SectionCount = GET_FILE_HEADER(Base)->NumberOfSections;
 
-	// 3. 遍历区段表，比较区段的名称，返回区段信息结构体的地址
-	for (WORD i = 0; i < SectionCount; ++i)
-	{
-		// 如果找到就直接返回
-		if (!memcmp(SectionName, SectionTable[i].Name, strlen(SectionName) + 1))
-			return &SectionTable[i];
-	}
+	PEInformation PEinfo;
+	PeOperation pe;
+	pe.LoadPeFile(path.c_str(), &PEinfo);
 
-	return nullptr;
-}
-
-/// <summary>
-/// 
-/// </summary>
-/// <param name="FileName"></param>
-VOID WinPack::LoadExeFile(LPCSTR FileName)
-{
-	// 如果文件存在，就打开文件，打开的目的只是为了读取其中的数据
-	HANDLE FileHandle = CreateFileA(FileName, GENERIC_READ, NULL,
-		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-
-	if (FileHandle == INVALID_HANDLE_VALUE) {
-		PrintLog(EVASION_ERROR_OPENFILE_NOFILE);
+	if (!pe.IsPEFile((UCHAR*)PEinfo.FileBase)) {
 		return;
 	}
 
-	// 获取文件的大小，并使用这个大小申请缓冲区
-	FileSize = GetFileSize(FileHandle, NULL);
-	if (FileSize == 0xFFFFFFFF) {
-		PrintLog(EVASION_ERROR_GETFILESIZE_FAIL);
+	//1.1 拉伸目标文件
+	ULONG_PTR TempBuff = pe.StretchFile(PEinfo.FileBase, PEinfo.SizeofImage);
+
+	//1.2.0 保存IAT表
+//	SaveImportTab((char*)TempBuff);
+	//1.2.1 清理IAT表
+//	ClearImportTab((char*)TempBuff);
+
+	getinfo((char*)TempBuff);
+
+	//1.5 把拉伸的文件还原成磁盘大小
+	ULONG_PTR TempBuff_1 = (ULONG_PTR)pe.ImageBuff_To_FileBuff((char*)TempBuff, PEinfo.FileSize);
+
+	//1.6 更新peinfo信息
+	pe.GetPEInformation_1((char*)TempBuff_1, &PEinfo, PEinfo.FileSize);
+
+	//1.7 加密代码段
+//	DWORD dwVirtualAddr = XorCode(byXor, PEinfo);
+
+	//----去掉随机加载基址----
+	PEinfo.OptionalHeader->DllCharacteristics = 0;
+
+	/*----------------------------------------------------------------------------------*/
+	/* 2、获取Stub文件的PE信息，将必要的信息设置到Stub中								*/
+	/*----------------------------------------------------------------------------------*/
+
+	HMODULE hModule = LoadLibrary(L"EvasionPackDll.dll");
+	if (NULL == hModule) hModule = LoadLibrary(L"EvasionPackDll.dll");
+
+	if (NULL == hModule)
+	{
+		MessageBoxA(NULL, "Stub.dll加载失败，请检查路径", "提示", MB_OK);
 		return;
+	} 
+
+	PGLOBAL_PARAM pstcParam = (PGLOBAL_PARAM)GetProcAddress(hModule, "g_stcParam");
+
+
+	pstcParam->dwImageBase = PEinfo.ImageBase;
+	pstcParam->dwCodeSize = PEinfo.SizeOfCode;
+	pstcParam->ulBaseOfCode = PEinfo.BaseOfCode;
+	pstcParam->dwOEP = PEinfo.AddressOfEntryPoint;
+	pstcParam->byXor = byXor;
+//	pstcParam->lpStartVA = (PBYTE)dwVirtualAddr;
+
+	//保存IAT的信息到Stub.dll的g_stcParam全局变量里
+	pstcParam->stcPEImportDir = m_PEImportDir;
+	pstcParam->stcPERelocDir = m_PERelocDir;
+	pstcParam->dwIATSectionBase = m_IATSectionBase;
+	pstcParam->dwIATSectionSize = m_IATSectionSize;
+	pstcParam->dwNumOfIATFuns = m_dwNumOfIATFuns;
+	pstcParam->dwSizeOfModBuf = m_dwSizeOfModBuf;
+
+	pstcParam->dwSizeOfFunBuf = m_dwSizeOfFunBuf;
+
+	//2.3 添加Stub代码段到被加壳程序中
+	//2.3.1 读取Stub代码段
+	AllocMemory m_alloc;
+	MODULEINFO modinfo = { 0 };
+	GetModuleInformation(GetCurrentProcess(), hModule, &modinfo, sizeof(MODULEINFO));
+	pstcParam->dwIATBaseRVA = PEinfo.SizeofImage + modinfo.SizeOfImage;
+	PBYTE lpMod = m_alloc.auto_malloc<PBYTE>(modinfo.SizeOfImage);
+	memcpy_s(lpMod, modinfo.SizeOfImage, hModule, modinfo.SizeOfImage);
+	PEInfo stubpeinfo;
+	pe.GetPEInformation_1((char*)lpMod, &stubpeinfo);
+
+
+	//2.3.2 修复重定位表
+	ULONG_PTR TarSizeofImage = pe.Alignment(PEinfo.SizeofImage, PEinfo.OptionalHeader->SectionAlignment);
+	ULONG_PTR value = stubpeinfo.ImageBase - (PEinfo.OptionalHeader->ImageBase + TarSizeofImage);
+
+	if (value != 0)
+	{
+		pe.PerformBaseRelocation((ULONG_PTR)lpMod, value);
 	}
 
-	FileBase = (DWORD)calloc(FileSize, sizeof(BYTE));
+	//2.3.3 修改被加壳程序的OEP，指向stub
+	PEinfo.OptionalHeader->AddressOfEntryPoint = TarSizeofImage + (pstcParam->dwStart - (ULONG_PTR)hModule);
 
-	// 将目标文件的内容读取到创建的缓冲区中
-	DWORD Read = 0;
-	ReadFile(FileHandle, (LPVOID)FileBase, FileSize, &Read, NULL);
+	//2.3.4 添加新节存放Stub.dll
+	pe.addSeciton(PEinfo.FileBase, stubpeinfo.SizeofImage, (char*)".vmp0");
 
-	// 为了防止句柄泄露应该关闭句柄
-	CloseHandle(FileHandle);
+	/*----------------------------------------------------------------------------------*/
+	/*	3、合并目标PE和Stub.dll以及把处理好的文件存盘									*/
+	/*----------------------------------------------------------------------------------*/
 
-	//判断是否是PE文件
-	IsFeFile();
+		//3.0 合并目标PE和Stub.dll
+	PBYTE NewBuffer = MergeSection(PEinfo, stubpeinfo, lpMod, byXor);
 
-	//获取代码段
-	GetDefaultCodeSection();
+	//3.1 清除不需要的目录信息
+	ClearDirTable((char*)NewBuffer);
 
-	///////////////////////////////////////////
 
-	// 以不执行 DllMain 的方式加载模块到当前的内存中
-	DllBase = (DWORD)LoadLibraryExA(DllNameTable[0].c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES);
 
-	GetPackDefaultCodeSection();
+	//3.2 保存文件
+	SaveFile_pack(szProxyAddr, (char*)NewBuffer, m_uTotalSize);
 
-	// 从 dll 中获取到 start 函数，并计算它的页内偏移(加载基址 + 区段基址 + 段内偏移)
-	DWORD Start = (DWORD)GetProcAddress((HMODULE)DllBase, "start");
-	StartOffset = Start - DllBase - GetSection(DllBase, PackDefaultCode.c_str())->VirtualAddress;
-
-	// 获取到共享信息
-	ShareData = (PSHAREDATA)GetProcAddress((HMODULE)DllBase, "ShareData");
-
+	//3.3 释放Stub.dll
+//	FreeLibrary(hModule);
+	return;
 }
 
-/// <summary>
-/// 添加新的区块
-/// </summary>
-/// <param name="SectionName">区块名称</param>
-/// <param name="SrcName">壳的区块名称</param>
-VOID WinPack::AddSection(LPCSTR SectionName, LPCSTR SrcName)
+void WinPack::StartProtect(HWND hwndDlg, TCHAR* strPath, BYTE byXor, PROTECTOR pProctect)
 {
-
-	// 1. 获取到区段表的最后一个元素的地址
-	auto LastSection = &GET_SECTION_HEADER(FileBase)
-		[GET_FILE_HEADER(FileBase)->NumberOfSections - 1];
-
-	// 2. 将文件头中保存的区段数量 + 1
-	GET_FILE_HEADER(FileBase)->NumberOfSections += 1;
-
-	// 3. 通过最后一个区段，找到新添加的区段的位置
-	auto NewSection = LastSection + 1;
-	memset(NewSection, 0, sizeof(IMAGE_SECTION_HEADER));
-
-	// 4.  从 dll 中找到我们需要拷贝的区段
-	auto SrcSection = GetSection(DllBase, SrcName);
-
-	// 5. 直接将源区段的完整信息拷贝到新的区段中
-	memcpy(NewSection, SrcSection, sizeof(IMAGE_SECTION_HEADER));
-
-	// 6. 设置新的区段表中的数据： 名称
-	memcpy(NewSection->Name, SectionName, 7);
-
-	// 7. 设置新的区段所在的 RVA = 上一个区段的RVA + 对齐的内存大小
-	NewSection->VirtualAddress = LastSection->VirtualAddress +
-		Alignment(LastSection->Misc.VirtualSize, GET_OPTIONAL_HEADER(FileBase)->SectionAlignment);
-
-	// 8. 设置新的区段所在的 FOA = 上一个区段的FOA + 对齐的文件大小
-	NewSection->PointerToRawData = LastSection->PointerToRawData +
-		Alignment(LastSection->SizeOfRawData, GET_OPTIONAL_HEADER(FileBase)->FileAlignment);
-
-	// 9. 重新计算文件的大小，申请新的空间保存原有的数据
-	FileSize = NewSection->SizeOfRawData + NewSection->PointerToRawData;
-	FileBase = (DWORD)realloc((VOID*)FileBase, FileSize);
-
-	// 11. 修改 SizeOfImage 的大小 = 最后一个区段的RVA + 最后一个区段的内存大小
-	GET_OPTIONAL_HEADER(FileBase)->SizeOfImage = NewSection->VirtualAddress + NewSection->Misc.VirtualSize;
 }
 
-/// <summary>
-/// 
-/// </summary>
-VOID WinPack::FixReloc()
+void WinPack::XorMachineCode(ULONGLONG cpuId, PEInfo& peinfo)
 {
-	DWORD Sizes = 0;
+	//获取被加壳程序的OEP
+	ULONG_PTR uCodeBase = peinfo.FileBase + peinfo.AddressOfEntryPoint;
 
+	//与代码段进行亦或
+	*(ULONGLONG*)uCodeBase ^= cpuId;
+}
 
-	DWORD Size = 0, OldProtect = 0;
+ULONGLONG WinPack::GetCPUID()
+{
+	return ULONGLONG();
+}
 
-	// 获取到程序的重定位表
-	auto RealocTable = (PIMAGE_BASE_RELOCATION)
-		ImageDirectoryEntryToData((PVOID)DllBase, TRUE, 5, &Size);
+DWORD WinPack::XorCode(BYTE byXOR, PEInfo peinfo)
+{
+	//判断基址在哪一节
+	ULONG Entry = peinfo.BaseOfCode;
+	PIMAGE_SECTION_HEADER Temp = peinfo.pSectionHeader;
 
-	// 如果 SizeOfBlock 不为空，就说明存在重定位块
-	while (RealocTable->SizeOfBlock )
+	for (int i = 0; i < peinfo.NumberOfSections; i++)
 	{
-		// 如果重定位的数据在代码段，就需要修改访问属性
-		VirtualProtect((LPVOID)(RealocTable->VirtualAddress + DllBase),
-			0x1000, PAGE_READWRITE, &OldProtect);
-
-		// 获取重定位项数组的首地址和重定位项的数量
-		int count = (RealocTable->SizeOfBlock - 8) / 2;
-		TypeOffset* to = (TypeOffset*)(RealocTable + 1);
-
-		// 遍历每一个重定位项，输出内容
-		for (int i = 0; i < count; i++)
+		if (Entry >= Temp->PointerToRawData && Entry < Temp->PointerToRawData + Temp->SizeOfRawData)
 		{
-			// 如果 type 的值为 3 我们才需要关注
-			if (to[i].Type == 3)
+			break;
+		}
+		++Temp;
+	}
+
+	//在内存中找到代码段的相对偏移位置
+	PBYTE pBase = (PBYTE)(Temp->PointerToRawData + (ULONGLONG)peinfo.FileBase);
+
+	//做异或运算加密
+	for (int i = 0; i < peinfo.SizeOfCode; i++)
+	{
+		pBase[i] ^= byXOR;
+	}
+	return Temp->VirtualAddress;
+}
+
+void WinPack::getinfo(char* m_pFileBuf)
+{
+
+	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)m_pFileBuf;  
+	PIMAGE_NT_HEADERS m_pNtHeader = (PIMAGE_NT_HEADERS)(m_pFileBuf + pDosHeader->e_lfanew);
+
+
+	//保存重定位目录信息
+	m_PERelocDir =
+		IMAGE_DATA_DIRECTORY(m_pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC]);
+
+	//保存IAT信息目录信息
+	m_PEImportDir =
+		IMAGE_DATA_DIRECTORY(m_pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT]);
+
+	//获取IAT所在的区段的起始位置和大小
+	PIMAGE_SECTION_HEADER pSectionHeader = IMAGE_FIRST_SECTION(m_pNtHeader);
+	for (DWORD i = 0; i < m_pNtHeader->FileHeader.NumberOfSections; i++, pSectionHeader++)
+	{
+		if (m_PEImportDir.VirtualAddress >= pSectionHeader->VirtualAddress &&
+			m_PEImportDir.VirtualAddress <= pSectionHeader[1].VirtualAddress)
+		{
+			//保存该区段的起始地址和大小
+			m_IATSectionBase = pSectionHeader->VirtualAddress;
+			m_IATSectionSize = pSectionHeader[1].VirtualAddress - pSectionHeader->VirtualAddress;
+			break;
+		}
+	}
+	
+
+}
+
+void WinPack::SaveImportTab(char* m_pFileBuf)
+{
+	//0.获取导入表结构体指针
+	PeOperation pe; 
+	DWORD Virtual = pe.GET_HEADER_DICTIONARY((ULONG_PTR)m_pFileBuf, 1);
+	if (Virtual == 0)
+	{
+		return;
+	}
+	PIMAGE_IMPORT_DESCRIPTOR pPEImport = (PIMAGE_IMPORT_DESCRIPTOR)(Virtual + m_pFileBuf);
+	//1.第一遍循环确定 m_pModNameBuf 和 m_pFunNameBuf 的大小
+	DWORD dwSizeOfModBuf = 0;
+	DWORD dwSizeOfFunBuf = 0;
+	m_dwNumOfIATFuns = 0;
+	while (pPEImport->Name)
+	{
+		DWORD dwModNameRVA = pPEImport->Name;
+		char* pModName = (char*)(m_pFileBuf + dwModNameRVA);
+		dwSizeOfModBuf += (strlen(pModName) + 1);
+
+		PIMAGE_THUNK_DATA pIAT = (PIMAGE_THUNK_DATA)(m_pFileBuf + pPEImport->FirstThunk);
+
+		while (pIAT->u1.AddressOfData)
+		{
+			if (IMAGE_SNAP_BY_ORDINAL(pIAT->u1.Ordinal))
 			{
-				// 获取到需要重定位的地址所在的位置
-				DWORD* addr = (DWORD*)(DllBase + RealocTable->VirtualAddress + to[i].Offset);
-
-				// 计算出不变的段内偏移 = *addr - imagebase - .text va
-				DWORD item = *addr - DllBase - GetSection(DllBase, PackDefaultCode.c_str())->VirtualAddress;
-
-				// 使用这个地址，计算出新的重定位后的数据
-				*addr = item + GET_OPTIONAL_HEADER(FileBase)->ImageBase + GetSection(FileBase, PackTestSection.c_str())->VirtualAddress;
-				// printf("\t%08x - %08X - %08X\n", addr, *addr, item);
+				m_dwNumOfIATFuns++;
 			}
+			else
+			{
+				m_dwNumOfIATFuns++;
+				ULONG_PTR dwFunNameRVA = pIAT->u1.AddressOfData;
+				PIMAGE_IMPORT_BY_NAME pstcFunName = (PIMAGE_IMPORT_BY_NAME)(m_pFileBuf + dwFunNameRVA);
+				dwSizeOfFunBuf += (strlen(pstcFunName->Name) + 1);
+			}
+			pIAT++;
+		}
+		pPEImport++;
+	}
+
+	//2.第二遍循环保存信息
+
+	//申请内存保存IAT表信息
+	m_pModNameBuf = m_allocMemory.auto_malloc<PVOID>(dwSizeOfModBuf);
+	m_pFunNameBuf = m_allocMemory.auto_malloc<PVOID>(dwSizeOfFunBuf);
+	m_pMyImport = m_allocMemory.auto_malloc<PMYIMPORT>(m_dwNumOfIATFuns * sizeof(MYIMPORT));
+
+
+	pPEImport = (PIMAGE_IMPORT_DESCRIPTOR)(Virtual + m_pFileBuf);
+	ULONG_PTR TempNumOfFuns = 0;
+	ULONG_PTR TempModRVA = 0;
+	ULONG_PTR TempFunRVA = 0;
+	while (pPEImport->Name)
+	{
+		DWORD dwModNameRVA = pPEImport->Name;
+		char* pModName = (char*)(m_pFileBuf + dwModNameRVA);
+		memcpy_s((PCHAR)m_pModNameBuf + TempModRVA, strlen(pModName) + 1,
+			pModName, strlen(pModName) + 1);
+
+		PIMAGE_THUNK_DATA pIAT = (PIMAGE_THUNK_DATA)(m_pFileBuf + pPEImport->FirstThunk);
+
+		while (pIAT->u1.AddressOfData)
+		{
+			if (IMAGE_SNAP_BY_ORDINAL(pIAT->u1.Ordinal))
+			{
+				//保存以序号出方式的函数信息
+				m_pMyImport[TempNumOfFuns].m_dwIATAddr = (ULONG_PTR)pIAT - (ULONG_PTR)m_pFileBuf;
+				m_pMyImport[TempNumOfFuns].m_bIsOrdinal = TRUE;
+#ifdef _WIN64
+				m_pMyImport[TempNumOfFuns].m_Ordinal = pIAT->u1.Ordinal & 0x7FFFFFFFFFFFFFFF;
+#else
+				m_pMyImport[TempNumOfFuns].m_Ordinal = pIAT->u1.Ordinal & 0x7FFFFFFF;
+#endif // DEBUG
+
+				m_pMyImport[TempNumOfFuns].m_dwModNameRVA = TempModRVA;
+			}
+			else
+			{
+				//保存名称号出方式的函数信息
+				m_pMyImport[TempNumOfFuns].m_dwIATAddr = (ULONG_PTR)pIAT - (ULONG_PTR)m_pFileBuf;
+
+				ULONG_PTR dwFunNameRVA = pIAT->u1.AddressOfData;
+				PIMAGE_IMPORT_BY_NAME pstcFunName = (PIMAGE_IMPORT_BY_NAME)(m_pFileBuf + dwFunNameRVA);
+				memcpy_s((PCHAR)m_pFunNameBuf + TempFunRVA, strlen(pstcFunName->Name) + 1,
+					pstcFunName->Name, strlen(pstcFunName->Name) + 1);
+
+				m_pMyImport[TempNumOfFuns].m_dwFunNameRVA = TempFunRVA;
+				m_pMyImport[TempNumOfFuns].m_dwModNameRVA = TempModRVA;
+				TempFunRVA += (strlen(pstcFunName->Name) + 1);
+			}
+			TempNumOfFuns++;
+			pIAT++;
+		}
+		TempModRVA += (strlen(pModName) + 1);
+		pPEImport++;
+	}
+
+	//逆序排列m_pMyImport
+	MYIMPORT stcTemp = { 0 };
+	DWORD dwTempNum = m_dwNumOfIATFuns / 2;
+	for (DWORD i = 0; i < dwTempNum; i++)
+	{
+		m_pMyImport[i];
+		m_pMyImport[m_dwNumOfIATFuns - i - 1];
+		memcpy_s(&stcTemp, sizeof(MYIMPORT), &m_pMyImport[i], sizeof(MYIMPORT));
+		memcpy_s(&m_pMyImport[i], sizeof(MYIMPORT), &m_pMyImport[m_dwNumOfIATFuns - i - 1], sizeof(MYIMPORT));
+		memcpy_s(&m_pMyImport[m_dwNumOfIATFuns - i - 1], sizeof(MYIMPORT), &stcTemp, sizeof(MYIMPORT));
+	}
+
+	//保存信息
+	m_dwSizeOfModBuf = dwSizeOfModBuf;
+	m_dwSizeOfFunBuf = dwSizeOfFunBuf;
+}
+
+void WinPack::ClearImportTab(char* m_pFileBuf)
+{
+	PeOperation pe;
+	DWORD DirData = pe.GET_HEADER_DICTIONARY((ULONG_PTR)m_pFileBuf, 1);
+	//1、获取导入表结构体指针
+	PIMAGE_IMPORT_DESCRIPTOR pPEImport =
+		(PIMAGE_IMPORT_DESCRIPTOR)(m_pFileBuf + DirData);
+
+	//2.开始循环抹去IAT(导入表)数据
+	//每循环一次抹去一个Dll的所有导入信息
+	while (pPEImport->Name)
+	{
+		//2.1.抹去模块名
+		DWORD dwModNameRVA = pPEImport->Name;
+		char* pModName = (char*)(m_pFileBuf + dwModNameRVA);
+		memset(pModName, 0, strlen(pModName));
+
+		PIMAGE_THUNK_DATA pIAT = (PIMAGE_THUNK_DATA)(m_pFileBuf + pPEImport->FirstThunk);
+		PIMAGE_THUNK_DATA pINT = (PIMAGE_THUNK_DATA)(m_pFileBuf + pPEImport->OriginalFirstThunk);
+
+		//2.2. 抹去IAT、INT和函数名函数序号
+		while (pIAT->u1.AddressOfData)
+		{
+			//判断是输出函数名还是序号
+			if (IMAGE_SNAP_BY_ORDINAL(pIAT->u1.Ordinal))
+			{
+				//抹去序号就是将pIAT清空
+			}
+			else
+			{
+				//输出函数名
+				ULONG_PTR dwFunNameRVA = pIAT->u1.AddressOfData;
+				PIMAGE_IMPORT_BY_NAME pstcFunName = (PIMAGE_IMPORT_BY_NAME)(m_pFileBuf + dwFunNameRVA);
+				//清除函数名和函数序号
+				memset(pstcFunName, 0, strlen(pstcFunName->Name) + sizeof(WORD));
+			}
+			memset(pINT, 0, sizeof(IMAGE_THUNK_DATA));
+			memset(pIAT, 0, sizeof(IMAGE_THUNK_DATA));
+			pINT++;
+			pIAT++;
 		}
 
-		// 还原原区段的的保护属性
-		VirtualProtect((LPVOID)(RealocTable->VirtualAddress + DllBase),
-			0x1000, OldProtect, &OldProtect);
+		//2.3.抹去导入表目录信息
+		memset(pPEImport, 0, sizeof(IMAGE_IMPORT_DESCRIPTOR));
 
+		//遍历下一个模块
+		pPEImport++;
+	}
+}
 
-		//-----------------------修正VirtualAddress字段--------------------------------------------
+void WinPack::ClearDirTable(char* filebuff)
+{
+	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)filebuff;
+	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(filebuff + pDosHeader->e_lfanew);
 
-		// 重定位中VirtualAddress 字段进行修改，需要把重定位表变成可写
-		VirtualProtect((LPVOID)(&RealocTable->VirtualAddress),
-			0x4, PAGE_READWRITE, &OldProtect);
+	//清除不需要的目录表信息
+	//只留输出表，重定位表，资源表
+	DWORD dwCount = 15;
+	for (DWORD i = 0; i < dwCount; i++)
+	{
+		if (i != IMAGE_DIRECTORY_ENTRY_EXPORT &&
+			i != IMAGE_DIRECTORY_ENTRY_RESOURCE &&
+			i != IMAGE_DIRECTORY_ENTRY_BASERELOC)
+		{
+			pNtHeader->OptionalHeader.DataDirectory[i].VirtualAddress = 0;
+			pNtHeader->OptionalHeader.DataDirectory[i].Size = 0;
+		}
+	}
+}
 
-		// 修正VirtualAddress，从壳中的text到 目标程序pack段
-		// 修复公式 ：VirtualAddress - 壳.text.VirtualAddress  + 目标程序.pack.VirtualAddress
-		RealocTable->VirtualAddress -= GetSection(DllBase, PackDefaultCode.c_str())->VirtualAddress;
-		RealocTable->VirtualAddress += GetSection(FileBase, PackTestSection.c_str())->VirtualAddress;
+PBYTE WinPack::MergeSection(PEInfo peinfo, PEInfo stubpeinfo, PBYTE lpMod, BYTE byXor)
+{
+	PeOperation pe;
+	//1、 计算保存IAT所用的空间大小
+	DWORD dwIATSize = 0;
+	dwIATSize = m_dwSizeOfModBuf + m_dwSizeOfFunBuf + m_dwNumOfIATFuns * sizeof(MYIMPORT);
 
-		// 还原原区段的的保护属性
-		VirtualProtect((LPVOID)(&RealocTable->VirtualAddress),
-			0x1000, OldProtect, &OldProtect);
-
-		// 找到下一个重定位块
-		RealocTable = (PIMAGE_BASE_RELOCATION)
-			((DWORD)RealocTable + RealocTable->SizeOfBlock);
-
+	if (dwIATSize % peinfo.SectionAlignment)
+	{
+		dwIATSize = (dwIATSize / peinfo.SectionAlignment + 1) * peinfo.SectionAlignment;
+	}
+	if (dwIATSize != 0)
+	{
+		//添加新节存放IAT表
+		pe.addSeciton(peinfo.FileBase, dwIATSize, (char*)".vmp1");
 	}
 
-	// 关闭程序的重定位，目前只是修复了壳代码的重定位，并不表示源程序支持重定位
-	GET_OPTIONAL_HEADER(FileBase)->DllCharacteristics = 0x8100;
+	//2、 申请新内存合并目标PE和Stub.dll
+	ULONG_PTR TarFileSize = pe.Alignment(peinfo.FileSize, peinfo.OptionalHeader->FileAlignment);//被加壳程序对齐后的文件大小
+	ULONG_PTR TotalSize = stubpeinfo.SizeofImage + TarFileSize + dwIATSize;
+	m_uTotalSize = TotalSize;//记录合并后的总大小,保存文件时要用到
+	PBYTE NewBuffer = m_allocMemory.auto_malloc<PBYTE>(TotalSize + 10);
+	memcpy_s(NewBuffer, TarFileSize, (char*)peinfo.FileBase, TarFileSize);
+	memcpy_s(NewBuffer + TarFileSize, stubpeinfo.SizeofImage, lpMod, stubpeinfo.SizeofImage);
 
-	// 修改目标程序重定位表的位置到新重定位表（.stu_re）
-	SetRelocTable();
+	//3、如果选择了加密IAT，则把IAT数据到拷贝 '.vmp1' 节
+	//拷贝IAT信息
+	if (dwIATSize == 0)
+	{
+		return NewBuffer;
+	}
+	ULONG_PTR dwIATBaseRVA = peinfo.FileSize + stubpeinfo.SizeofImage;
+
+	memcpy_s(NewBuffer + dwIATBaseRVA,
+		dwIATSize, m_pMyImport, m_dwNumOfIATFuns * sizeof(MYIMPORT));
+
+	//加密模块名
+	for (DWORD i = 0; i < m_dwSizeOfModBuf; i++)
+	{
+		if (((char*)m_pModNameBuf)[i] != 0)
+		{
+			((char*)m_pModNameBuf)[i] ^= byXor;
+		}
+	}
+
+	memcpy_s(NewBuffer + dwIATBaseRVA + m_dwNumOfIATFuns * sizeof(MYIMPORT),
+		dwIATSize, m_pModNameBuf, m_dwSizeOfModBuf);
+
+	//IAT函数名加密
+	for (DWORD i = 0; i < m_dwSizeOfFunBuf; i++)
+	{
+		if (((char*)m_pFunNameBuf)[i] != 0)
+		{
+			((char*)m_pFunNameBuf)[i] ^= byXor;
+		}
+	}
+
+	memcpy_s(NewBuffer + dwIATBaseRVA + m_dwNumOfIATFuns * sizeof(MYIMPORT) + m_dwSizeOfModBuf,
+		dwIATSize, m_pFunNameBuf, m_dwSizeOfFunBuf);
+
+	return NewBuffer;
 }
 
-/// <summary>
-/// 
-/// </summary>
-VOID WinPack::SetRelocTable()
+void WinPack::SaveFile_pack(TCHAR* strPath, char* NewBuffer, ULONG_PTR m_uTotalSize)
 {
-	// 获取原始程序的重定位表，进行备份
-	ShareData->oldRelocRva =
-		GET_NT_HEADER(FileBase)->OptionalHeader.DataDirectory[5].VirtualAddress;
-
-	// 修改重定位到新的区段 （stu_re）
-	GET_NT_HEADER(FileBase)->OptionalHeader.DataDirectory[5].VirtualAddress
-		= GetSection(FileBase, PackRelocName.c_str())->VirtualAddress;
-
-	// 修改重定位大小  目标.director[5].size = 壳.director[5].size;
-	GET_NT_HEADER(FileBase)->OptionalHeader.DataDirectory[5].Size =
-		GET_NT_HEADER(DllBase)->OptionalHeader.DataDirectory[5].Size;
-
-	// 让程序支持重定位
-	GET_NT_HEADER(FileBase)->FileHeader.Characteristics &= 0xFFFFFFFE;
-	GET_NT_HEADER(FileBase)->OptionalHeader.DllCharacteristics |= IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE;
-
-	// 备份原始加载基址，壳修复时使用
-	ShareData->oldImageBase = GET_NT_HEADER(FileBase)->OptionalHeader.ImageBase;
-
-	return VOID();
-}
-
-/// <summary>
-/// 重新设置OEP
-/// </summary>
-VOID WinPack::SetOEP()
-{
-	// 修改原始 oep 之前，保存 oep
-	ShareData->OldOep = GET_OPTIONAL_HEADER(FileBase)->AddressOfEntryPoint;
-
-	// --------------------AddressOfEntryPoint----------------------
-
-	// 新的 rav = start 的段内偏移 + 新区段的 rva
-	GET_OPTIONAL_HEADER(FileBase)->AddressOfEntryPoint = StartOffset +
-		GetSection(FileBase, PackTestSection.c_str())->VirtualAddress;
-}
-
-/// <summary>
-/// 填充新区段内容
-/// </summary>
-/// <param name="SectionName"></param>
-/// <param name="SrcName"></param>
-VOID WinPack::CopySectionData(LPCSTR SectionName, LPCSTR SrcName)
-{
-	// 获取源区段在虚拟空间(dll->映像)中的基址
-	BYTE* SrcData = (BYTE*)(GetSection(DllBase, SrcName)->VirtualAddress + DllBase);
-
-	// 获取目标区段在虚拟空间(堆->镜像)中的基址
-	BYTE* DestData = (BYTE*)(GetSection(FileBase, SectionName)->PointerToRawData + FileBase);
-
-	// 直接进行内存拷贝
-	memcpy(DestData, SrcData, GetSection(DllBase, SrcName)->SizeOfRawData);
-}
-
-VOID WinPack::SaveFile(LPCSTR FileName)
-{
+	
 	// 无论文件是否存在，都要创建新的文件
-	HANDLE FileHandle = CreateFileA(FileName, GENERIC_WRITE, NULL,
+	HANDLE FileHandle = CreateFile(strPath, GENERIC_WRITE, NULL,
 		NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
 	// 将目标文件的内容读取到创建的缓冲区中
 	DWORD Write = 0;
-	WriteFile(FileHandle, (LPVOID)FileBase, FileSize, &Write, NULL);
+	WriteFile(FileHandle, (LPVOID)NewBuffer, m_uTotalSize, &Write, NULL);
 
 	// 为了防止句柄泄露应该关闭句柄
 	CloseHandle(FileHandle);
-}
-
-/// <summary>
-/// 压缩区段
-/// </summary>
-/// <param name="SectionName"></param>
-/// <returns></returns>
-bool WinPack::CompressSection(std::string SectionName)
-{
-	// 获取这个区段信息
-	PIMAGE_SECTION_HEADER pSection = GetSection(FileBase, SectionName.c_str());
-	// 压缩前位置
-	char* pRoffset = (char*)(pSection->PointerToRawData + FileBase);
-	// 区段在文件中的大小
-	long lSize = pSection->SizeOfRawData;
-
-	// 0 保存压缩前信息
-	// 压缩数据的RVA
-	ShareData->FrontCompressRva = pSection->VirtualAddress;
-	// 压缩前大小Size
-	ShareData->FrontCompressSize = lSize;
-
-	// ---------------------------------开始压缩
-	// 1 获取预估的压缩后的字节数:
-	int compress_size = LZ4_compressBound(lSize);
-	// 2. 申请内存空间, 用于保存压缩后的数据
-	char* pBuff = new char[compress_size];
-	// 3. 开始压缩文件数据(函数返回压缩后的大小)
-	ShareData->LaterCompressSize = LZ4_compress(
-		pRoffset,/*压缩前的数据*/
-		pBuff, /*压缩后的数据*/
-		lSize/*文件原始大小*/);
-
-	// 4.将压缩后的数据覆盖原始数据
-	memcpy(pRoffset, pBuff, ShareData->LaterCompressSize);
-
-	// 5.修复当前区段文件大小 
-	pSection->SizeOfRawData = Alignment(ShareData->LaterCompressSize, 0x200);
-
-	// 6.将所有区段向上提升
-	PIMAGE_SECTION_HEADER pFront = pSection;
-	PIMAGE_SECTION_HEADER pLater = pSection + 1;
-	// 没有后一个区段，就不需要提升
-	while (pLater->VirtualAddress)
-	{
-		// 当前区段大小
-		long DesSize = pFront->SizeOfRawData;
-		// 移动到这个区段后面
-		char* pDest = (char*)(pFront->PointerToRawData + FileBase + DesSize);
-
-		// 下个区段大小
-		long SrcSize = pLater->SizeOfRawData;
-		// 下一个区段位置
-		char* pSrc = (char*)(pLater->PointerToRawData + FileBase);
-
-		// 拷贝区段
-		memcpy(pDest, pSrc, SrcSize);
-
-		// 修改下个区段位置 不加FileBase，应为不是在内存中
-		pLater->PointerToRawData = pFront->PointerToRawData + DesSize;
-
-		// 继续提升下个区段
-		pFront += 1;
-		pLater += 1;
-	}
-
-	// 7.重新修改文件实际大小
-	// 实际大小 = 最后一个区段位置 + 最后区段大小
-	FileSize = pFront->PointerToRawData + pFront->SizeOfRawData;
-
-	// 8.重新修改文件大小
-	FileBase = (DWORD)realloc((VOID*)FileBase, FileSize);
-
-	// 9.释放空间
-	delete[]pBuff;
-
-	return true;
-}
 
 
-/// <summary>
-/// 获取默认代码段
-/// </summary>
-void WinPack::GetDefaultCodeSection()
-{
-	auto OEP = GET_OPTIONAL_HEADER(FileBase)->AddressOfEntryPoint;
-	auto count = GET_NT_HEADER(FileBase)->FileHeader.NumberOfSections;
-	IMAGE_SECTION_HEADER* SecHeader = GET_SECTION_HEADER(FileBase);
-	
-	for (auto iter = 0; iter < count; iter++) {
-		if ((SecHeader[iter].VirtualAddress + SecHeader[iter].SizeOfRawData) > OEP && OEP > SecHeader[iter].VirtualAddress) {
-			DefaultCode = std::move(std::string((char*)SecHeader[iter].Name));
-			return;
-		}
-	}
-
-	DefaultCode = "";
-}
-
-/// <summary>
-/// 加密默认代码段
-/// </summary>
-/// <param name="SectionName"></param>
-void WinPack::XorSection(std::string SectionName)
-{
-	// 1. 获取到需要加密的区段的信息
-	auto XorSection = GetSection(FileBase, ".text");
-
-	// 2. 找到需要加密的字段所在内存中的位置
-	BYTE* data = (BYTE*)(XorSection->PointerToRawData + FileBase);
-
-	// 3. 填写解密时需要提供的信息
-	srand((unsigned int)time(0));
-	ShareData->key = rand() % 0xff;
-	ShareData->rva = XorSection->VirtualAddress;
-	ShareData->size = XorSection->SizeOfRawData;
-
-	// 4. 循环开始进行加密
-	for (int i = 0; i < ShareData->size; ++i)
-	{
-		data[i] ^= ShareData->key;
-	}
-}
-
-/// <summary>
-/// 加密所有区段
-/// </summary>
-void WinPack::EncryptAllSection()
-{
-
-	unsigned char key1[] =
-	{
-		0xab, 0x74, 0xf5, 0x36,
-		0x28, 0xae, 0xd2, 0xa4,
-		0xaa, 0xf7, 0x15, 0x82,
-		0x19, 0x2b, 0x44, 0x3c
-	};
-
-	//初始化aes对象
-	CAES aes(key1);
-
-	//获取区段数量
-	DWORD dwSectionCount = GET_FILE_HEADER(FileBase)->NumberOfSections;
-	//获取第一个区段
-	IMAGE_SECTION_HEADER* pFirstSection = GET_SECTION_HEADER(FileBase);
-	//用于保存数据
-	ShareData->data[20][2] = { 0 };
-	ShareData->index = 0;
-
-	//DWORD dwIsTls = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".reloc");
-	//DWORD dwIsTls2 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".data");
-	//DWORD dwIsTls4 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".stu_re");
-	for (DWORD i = 0; i < dwSectionCount; i++)
-	{
-		DWORD dwIsRsrc = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".rsrc");
-		DWORD dwIsTls3 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".rdata");
-		DWORD dwIsTls1 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".pack");
-
-
-		//跳过资源 只读数据 壳区段
-		if (dwIsRsrc == 0 || dwIsTls1 == 0 || dwIsTls3 == 0)// || pFirstSection[i].PointerToRawData == 0 || pFirstSection[i].SizeOfRawData == 0
-		{
-			continue;
-		}
-		else       //开始加密所有区段
-		{
-			//获取区段的首地址和大小
-			BYTE* pTargetSection = pFirstSection[i].PointerToRawData + (BYTE*)FileBase;
-			DWORD dwTargetSize = pFirstSection[i].SizeOfRawData;
-
-			//修改属性为可写
-			DWORD dwOldAttr = 0;
-			VirtualProtect(pTargetSection, dwTargetSize, PAGE_EXECUTE_READWRITE, &dwOldAttr);
-			//加密目标区段
-			aes.Cipher(pTargetSection, dwTargetSize);
-			//修改回原来的属性
-			VirtualProtect(pTargetSection, dwTargetSize, dwOldAttr, &dwOldAttr);
-
-			//保存数据到共享信息结构体
-			ShareData->data[ShareData->index][0] = pFirstSection[i].VirtualAddress;
-			ShareData->data[ShareData->index][1] = dwTargetSize;
-			ShareData->index++;
-		}
-	}
-	memcpy(ShareData->key1, key1, 16);
-}
-
-void WinPack::GetPackDefaultCodeSection()
-{
-	auto OEP = GET_OPTIONAL_HEADER(DllBase)->AddressOfEntryPoint;
-	auto count = GET_NT_HEADER(DllBase)->FileHeader.NumberOfSections;
-	IMAGE_SECTION_HEADER* SecHeader = GET_SECTION_HEADER(DllBase);
-
-	for (auto iter = 0; iter < count; iter++) {
-		if ((SecHeader[iter].VirtualAddress + SecHeader[iter].SizeOfRawData) > OEP && OEP > SecHeader[iter].VirtualAddress) {
-			PackDefaultCode = std::move(std::string((char*)SecHeader[iter].Name));
-			return;
-		}
-
-	}
-}
-
-/// <summary>
-/// 判断是否是PE文件
-/// </summary>
-/// <returns></returns>
-bool WinPack::IsFeFile()
-{
-
-	if (GET_DOS_HEADER(FileBase)->e_magic != IMAGE_DOS_SIGNATURE) {
-		
-		PrintLog(EVASION_ERROR_FILETYPE_ERROR);
-		return false;
-	}
-
-	if (GET_NT_HEADER(FileBase)->FileHeader.NumberOfSections == 1) {
-
-		PrintLog(EVASION_ERROR_FILE_ISCOMPRESSED);
-		return false;
-	}
-
-	if ((GET_SECTION_HEADER(FileBase) + 1)->VirtualAddress < (GET_OPTIONAL_HEADER(FileBase)->AddressOfEntryPoint)) {
-
-		PrintLog(EVASION_ERROR_FILE_ISCOMPRESSED);
-		return false;
-	}
-
-	return true;
-}
-
-// 操作导入表
-void WinPack::SetClearImport()
-{
-	// 1 保存导入表
-	PIMAGE_NT_HEADERS pNt = GET_NT_HEADER(FileBase);
-	ShareData->ImportRva = pNt->OptionalHeader.DataDirectory[1].VirtualAddress;
-	// 2 清空导入表
-	pNt->OptionalHeader.DataDirectory[1].VirtualAddress = 0;
-	pNt->OptionalHeader.DataDirectory[1].Size = 0;
-	// 3 清空IAT表
-	pNt->OptionalHeader.DataDirectory[12].VirtualAddress = 0;
-	pNt->OptionalHeader.DataDirectory[12].Size = 0;
-	return;
+//	FileOperation fileopt;
+//
+//	CString str = strPath;
+//	int cutsize = str.RightFindChar(strPath, 0x5c);//0x5c是‘\’这个字符的二进制
+//	CString s = str.MidCut(cutsize + 1, _tcslen(strPath) - cutsize - 5);
+//
+//
+//	TCHAR Path_Out[MAX_PATH];
+//	_tgetcwd(Path_Out, MAX_PATH);//获取当前程序的路径
+//
+//	str = Path_Out;
+//#ifdef UNICODE
+//	str = str + L"\\" + s.GetString() + L"_vmp.exe";
+//#else
+//	str = str + "\\" + s.GetString() + "_vmp.exe";
+//#endif // !UNICODE
+//
+//
+//	bool res = fileopt.SaveFile_((char*)NewBuffer, m_uTotalSize, str.GetString());
+//	if (res == 0)
+//	{
+//		MessageBoxW(NULL, L"文件保存失败!!", L"温馨提示", MB_ICONHAND);
+//		return;
+//	}
+//	TCHAR temp[] = _T("加壳成功！\r\n文件所在路径：\r\n");
+//	CString ss = temp;
+//	ss += str;
+//#ifdef UNICODE
+//	MessageBoxW(NULL, ss.GetString(), L"温馨提示", MB_ICONINFORMATION);
+//#else
+//	MessageBoxA(NULL, ss.GetString(), "温馨提示", MB_ICONINFORMATION);
+//#endif // !UNICODE
 }

@@ -13,6 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Common">
+      <UniqueIdentifier>{99730c0d-3369-4537-b14c-3b224eb175dd}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="EvasionPack.cpp">
@@ -27,12 +30,12 @@
     <ClCompile Include="lz4.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="PeOperation.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Tooltip.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="Common.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="WinPack.h">
@@ -46,6 +49,18 @@
     </ClInclude>
     <ClInclude Include="lz4.h">
       <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="PeOperation.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Common.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="ShareData.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="AllocMemory.h">
+      <Filter>Common</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

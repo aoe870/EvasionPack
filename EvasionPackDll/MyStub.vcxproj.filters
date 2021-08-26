@@ -24,6 +24,12 @@
     <ClCompile Include="AES.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="ReleaseCore.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="stub.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="lz4.h">
@@ -33,6 +39,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="stub.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ReleaseCore.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

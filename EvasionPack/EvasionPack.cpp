@@ -43,15 +43,16 @@ void GetUserOperate(std::map<std::string, std::string> table) {
         //加壳
         else if (iter.first == "-f") {
 
-            std::string newFileName = "demo_pack.exe" ;
+            std::string newFileName = "demo_pack1.exe" ;
 
             for (auto map : table) {
                 if (map.first == "-n") {
                     newFileName = map.second;
                 }
             }
+            WinPack winPack = std::move(WinPack());
+            return;
 
-            WinPack pack(iter.second, newFileName);
         }
         
     }
@@ -62,6 +63,9 @@ int main(int argc, char** argv)
 
     //std::cout << LOGO << std::endl;
  
+    WinPack winPack = std::move(WinPack());
+    return 0;
+
     if (sizeof(argc) < 2) {
 
         PrintLog(EVASION_ERROR_ADDRB, LOGTRPE_ERROR);
