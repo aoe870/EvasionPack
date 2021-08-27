@@ -3,16 +3,16 @@
 #include <time.h>
 #include "Common.h"
 
-PE::PE()
+PeOperation::PeOperation()
 {
 }
 
-PE::~PE()
+PeOperation::~PeOperation()
 {
 }
 
 //时间戳转换为标准时间
-TCHAR* PE::Stamp_To_Standard(DWORD stampTime)
+TCHAR* PeOperation::Stamp_To_Standard(DWORD stampTime)
 {
 	time_t tick = (time_t)stampTime;
 	struct tm tm;
@@ -21,7 +21,7 @@ TCHAR* PE::Stamp_To_Standard(DWORD stampTime)
 	return s;
 }
 
-BOOLEAN PE::IsPEFile(UCHAR* pFileBuffer, HWND hwndDlg)
+BOOLEAN PeOperation::IsPEFile(UCHAR* pFileBuffer, HWND hwndDlg)
 {
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFileBuffer;
 	if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
@@ -67,7 +67,7 @@ BOOLEAN PE::IsPEFile(UCHAR* pFileBuffer, HWND hwndDlg)
 *※※*	Author:		    LCH
 */////////////////////////////////////////////////////////////////;
 //#ifdef _WIN64
-void PE::PerformBaseRelocation(POINTER_TYPE buff, POINTER_TYPE Value)
+void PeOperation::PerformBaseRelocation(POINTER_TYPE buff, POINTER_TYPE Value)
 {
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)buff;
 	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(buff + pDosHeader->e_lfanew);
@@ -133,7 +133,7 @@ void PE::PerformBaseRelocation(POINTER_TYPE buff, POINTER_TYPE Value)
 *※※*	Parameter:
 *※※*	Author:		    LCH
 */////////////////////////////////////////////////////////////////;
-BOOL PE::RebuildImportTable(POINTER_TYPE buff)
+BOOL PeOperation::RebuildImportTable(POINTER_TYPE buff)
 {
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)buff;
 	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(buff + pDosHeader->e_lfanew);
@@ -202,7 +202,7 @@ BOOL PE::RebuildImportTable(POINTER_TYPE buff)
 *※※*	Parameter_5:
 *※※*	Author:		    LCH
 */////////////////////////////////////////////////////////////////;
-POINTER_TYPE PE::StretchFile(POINTER_TYPE pFileBuff, DWORD FileSize)
+POINTER_TYPE PeOperation::StretchFile(POINTER_TYPE pFileBuff, DWORD FileSize)
 {
 
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFileBuff;
@@ -246,9 +246,8 @@ POINTER_TYPE PE::StretchFile(POINTER_TYPE pFileBuff, DWORD FileSize)
 *※※*	Parameter_5:
 *※※*	Author:		    LCH
 */////////////////////////////////////////////////////////////////;
-char* PE::ImageBuff_To_FileBuff(char* imgbuffer, DWORD length)
+char* PeOperation::ImageBuff_To_FileBuff(char* imgbuffer, DWORD length)
 {
-	auto tmp = new BYTE[100];
 
 	char* pFileBuffer = NULL;
 	//LPVOID pImageBuffer = NULL;
@@ -266,8 +265,6 @@ char* PE::ImageBuff_To_FileBuff(char* imgbuffer, DWORD length)
 			length = pSec_temp->PointerToRawData + pSec_temp->SizeOfRawData;//更新文件的长度
 	}
 
-	auto tet = new std::string("ssss");
-	auto ww = new BYTE[100];
 
 	//pFileBuffer = new char[length];
 	pFileBuffer = m_alloc.auto_malloc<CHAR*>(length);
@@ -304,7 +301,7 @@ char* PE::ImageBuff_To_FileBuff(char* imgbuffer, DWORD length)
 *※※*	Parameter_5:
 *※※*	Author:		    LCH
 */////////////////////////////////////////////////////////////////;
-DWORD PE::GET_HEADER_DICTIONARY(POINTER_TYPE module, int idx)
+DWORD PeOperation::GET_HEADER_DICTIONARY(POINTER_TYPE module, int idx)
 {
 
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)module;
@@ -333,37 +330,11 @@ DWORD PE::GET_HEADER_DICTIONARY(POINTER_TYPE module, int idx)
 *※※*	Parameter_5:
 *※※*	Author:		    LCH
 */////////////////////////////////////////////////////////////////;
-bool PE::GetPEInformation_(TCHAR* FilePath, _Out_ PEInformation* pPEInfor)
+bool PeOperation::GetPEInformation_(TCHAR* FilePath, _Out_ PEInformation* pPEInfor)
 {
 
 	//------------------------------------------------------------------------------------
-		////1.1 获取文件句柄
-		//HANDLE hFile = CreateFile(
-		//	FilePath,
-		//	GENERIC_READ,
-		//	0,
-		//	NULL,
-		//	OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-
-		////1.2 获取文件大小
-		//DWORD dwFileSize = GetFileSize(hFile, NULL);
-		////CHAR *pFileBuf = new CHAR[dwFileSize];
-
-		//CHAR *pFileBuf = m_alloc.auto_malloc<CHAR*>(dwFileSize);
-		//memset(pFileBuf, 0, dwFileSize);
-
-		////1.3 将文件读取到内存
-		//DWORD ReadSize = 0;
-		//ReadFile(hFile, pFileBuf, dwFileSize, (LPDWORD)&ReadSize, NULL);
-
-		////1.4 关闭句柄
-		//CloseHandle(hFile);
-	//-----------------------------------------------------------------------------
-
-
 	/////////////////////////////////////////////////////////////
-
-
 	HANDLE hFileHandle = CreateFile(FilePath, GENERIC_READ, NULL,
 		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 
@@ -381,7 +352,9 @@ bool PE::GetPEInformation_(TCHAR* FilePath, _Out_ PEInformation* pPEInfor)
 		return FALSE;
 	}
 
-	auto pFileBuf = (POINTER_TYPE)calloc(pFileSize, sizeof(BYTE));
+	//auto pFileBuf = (POINTER_TYPE)calloc(pFileSize, sizeof(BYTE));
+
+	auto pFileBuf = m_alloc.auto_malloc<CHAR*>(pFileSize);
 
 	// 将目标文件的内容读取到创建的缓冲区中
 	DWORD Read = 0;
@@ -400,7 +373,7 @@ bool PE::GetPEInformation_(TCHAR* FilePath, _Out_ PEInformation* pPEInfor)
 	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(pFileBuf + pDosHeader->e_lfanew);
 	PIMAGE_OPTIONAL_HEADER OptionalHeader = (PIMAGE_OPTIONAL_HEADER)((POINTER_TYPE)pFileBuf + pDosHeader->e_lfanew + 4 + IMAGE_SIZEOF_FILE_HEADER);
 	PIMAGE_SECTION_HEADER pSectionHeader = (PIMAGE_SECTION_HEADER)((POINTER_TYPE)OptionalHeader + pNtHeader->FileHeader.SizeOfOptionalHeader);
-
+	
 	if (pNtHeader->Signature != IMAGE_NT_SIGNATURE)
 	{
 		MessageBoxA(NULL, "不是PE文件", "提示", MB_OK);
@@ -447,7 +420,7 @@ bool PE::GetPEInformation_(TCHAR* FilePath, _Out_ PEInformation* pPEInfor)
 *※※*	Parameter_5:
 *※※*	Author:		    LCH
 */////////////////////////////////////////////////////////////////;
-bool PE::GetPEInformation_1(char* pFilebuff, PEInformation* pPEInfor, DWORD dwFileSize)
+bool PeOperation::GetPEInformation_1(char* pFilebuff, PEInformation* pPEInfor, DWORD dwFileSize)
 {
 	//2.1 判断是否为PE文件
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFilebuff;
@@ -507,7 +480,7 @@ bool PE::GetPEInformation_1(char* pFilebuff, PEInformation* pPEInfor, DWORD dwFi
 *※※*	Parameter_5:
 *※※*	Author:		    LCH
 */////////////////////////////////////////////////////////////////;
-bool PE::addSeciton(POINTER_TYPE pFileBuff, DWORD AddSize, char secname[8])
+bool PeOperation::addSeciton(POINTER_TYPE pFileBuff, DWORD AddSize, char secname[8])
 {
 	/*if (secname[7] !=0xCC)
 	{

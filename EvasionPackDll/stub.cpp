@@ -21,13 +21,8 @@ void DecodeIAT();
 void preventdebug();
 
 
-
-/*----------------------------------------------------------------------------------*/
-/*		   加壳程序开始执行的地方   												*/
-/*----------------------------------------------------------------------------------*/
 void Start()
 {
-
 
 	InitInformation();
 	RebuildImportTable();
@@ -83,10 +78,10 @@ ULONG_PTR  InitInformation()
 
 #ifdef _WIN64
 	//弹出信息框			
-	int nRet = Preventdebug.g_pfnMessageBox(NULL, L"欢迎使用免费64位加壳程序，是否运行主程序？", L"Hello PEDIY", MB_YESNO);
+	int nRet = Preventdebug.g_pfnMessageBox(NULL, L"壳程序执行中", L"title", MB_YESNO);
 #else
 	//弹出信息框			
-	int nRet = Preventdebug.g_pfnMessageBox(NULL, L"欢迎使用免费32位加壳程序，是否运行主程序？", L"Hello PEDIY", MB_YESNO);
+	int nRet = Preventdebug.g_pfnMessageBox(NULL, L"壳程序执行中", L"title", MB_YESNO);
 #endif
 
 	if (nRet == IDYES)

@@ -146,6 +146,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AES.cpp" />
+    <ClCompile Include="CString.cpp" />
     <ClCompile Include="EvasionPack.cpp" />
     <ClCompile Include="lz4.cpp" />
     <ClCompile Include="PeOperation.cpp" />
@@ -155,10 +156,10 @@
     <ClInclude Include="AES.h" />
     <ClInclude Include="AllocMemory.h" />
     <ClInclude Include="Common.h" />
+    <ClInclude Include="CString.h" />
     <ClInclude Include="EvasionPack.h" />
     <ClInclude Include="lz4.h" />
     <ClInclude Include="PeOperation.h" />
-    <ClInclude Include="ShareData.h" />
     <ClInclude Include="Tooltip.h" />
     <ClInclude Include="WinPack.h" />
   </ItemGroup>

@@ -1,4 +1,6 @@
 #pragma once
+#ifndef PACK_ALLOCMEMORY_H
+#define PACK_ALLOCMEMORY_H
 #include <vector>
 #include <basetsd.h>
 using namespace std;
@@ -15,8 +17,9 @@ public:
 			{
 				continue;
 			}
-			free(p[i]);
-			p[i] = 0;
+
+			//HeapDestroy(p[i]);
+		
 		}
 		p.clear();
 	}
@@ -31,3 +34,4 @@ public:
 		return tmp;
 	}
 };
+#endif

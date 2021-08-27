@@ -8,6 +8,7 @@
 #include <vector>
 #include "Tooltip.h"
 #include "EvasionPack.h"
+#include <atlstr.h>
 
 /// <summary>
 /// intתstring
@@ -60,4 +61,12 @@ static std::string ByteToString(char* key) {
 	p[sizeof(key)] = 0;
 	return std::string(p);
 }
+
+static TCHAR* stringToTCHAR(std::string str) {
+	TCHAR* param = new TCHAR[str.size() + 1];
+	param[str.size()] = 0;
+	std::copy(str.begin(), str.end(), param);
+	return param;
+}
+
 #endif // PACK_CONMMON_H

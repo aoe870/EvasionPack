@@ -50,7 +50,9 @@ void GetUserOperate(std::map<std::string, std::string> table) {
                     newFileName = map.second;
                 }
             }
-            WinPack winPack = std::move(WinPack());
+
+            TCHAR* pathFile = stringToTCHAR(iter.second);
+            WinPack winPack = std::move(WinPack(pathFile));
             return;
 
         }
@@ -62,9 +64,6 @@ int main(int argc, char** argv)
 {
 
     //std::cout << LOGO << std::endl;
- 
-    WinPack winPack = std::move(WinPack());
-    return 0;
 
     if (sizeof(argc) < 2) {
 

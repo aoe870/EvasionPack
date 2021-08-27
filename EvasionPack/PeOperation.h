@@ -1,14 +1,10 @@
 #pragma once
+#ifndef PACK_PeOperation_H
+#define PACK_PeOperation_H
 #include <Windows.h>
 #include <tchar.h>
 #include "AllocMemory.h"
-
-//#define DWORD unsigned int
-#ifdef _WIN64
-#define POINTER_TYPE ULONGLONG
-#else
-#define POINTER_TYPE DWORD
-#endif
+#include "Common.h"
 
 //PE结构的信息结构体
 typedef struct PEInformation
@@ -35,13 +31,13 @@ typedef struct PEInformation
 }PEInfo, * pPEInfo;
 
 
-class PE :public AllocMemory
+class PeOperation :public AllocMemory
 {
 	AllocMemory m_alloc;
 	TCHAR s[100];//时间戳
 public:
-	PE();
-	~PE();
+	PeOperation();
+	~PeOperation();
 public:
 	//时间戳转换为标准时间
 	TCHAR* Stamp_To_Standard(DWORD stampTime);
@@ -186,3 +182,4 @@ public:
 
 };
 
+#endif

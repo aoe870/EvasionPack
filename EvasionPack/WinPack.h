@@ -5,15 +5,15 @@
 #include <iostream>
 #include <Windows.h>
 #include "../EvasionPackDll/stub.h"
-#include "AllocMemory.h"
 #include "PeOperation.h"
+
 
 class WinPack
 {
 
 public:
 
-	WinPack();
+	WinPack(TCHAR* path);
 
 	//开始保护
 	void StartProtect(HWND hwndDlg, TCHAR* strPath, BYTE byXor, PROTECTOR	pProctect);

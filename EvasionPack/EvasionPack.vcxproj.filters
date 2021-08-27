@@ -33,6 +33,9 @@
     <ClCompile Include="PeOperation.cpp">
       <Filter>Common</Filter>
     </ClCompile>
+    <ClCompile Include="CString.cpp">
+      <Filter>Common</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Tooltip.h">
@@ -56,10 +59,10 @@
     <ClInclude Include="Common.h">
       <Filter>Common</Filter>
     </ClInclude>
-    <ClInclude Include="ShareData.h">
+    <ClInclude Include="AllocMemory.h">
       <Filter>Common</Filter>
     </ClInclude>
-    <ClInclude Include="AllocMemory.h">
+    <ClInclude Include="CString.h">
       <Filter>Common</Filter>
     </ClInclude>
   </ItemGroup>

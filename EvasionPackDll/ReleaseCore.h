@@ -1,4 +1,6 @@
 #pragma once
+#ifndef PACK_RELEASECORE_H
+#define PACK_RELEASECORE_H
 #include <Windows.h>
 
 class ReleaseCore
@@ -96,3 +98,4 @@ public:
 	bool GetProcessIdByName(TCHAR* szProcessName);
 };
 
+#endif // !PACK_ReleaseCore_H
