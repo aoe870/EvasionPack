@@ -5,10 +5,39 @@
 #include "lz4.h"
 #include "AES.h"
 #include <DbgHelp.h>
+#include "PeOperation.h"
 
 #pragma comment(lib, "DbgHelp.lib")
 
 std::vector<std::string> DllNameTable{ "EvasionPackDll.dll" };
+
+
+WinPack::WinPack() {
+
+	TCHAR path[100] = L"../output/demo.exe";
+
+	PEInfo *peinfo;
+	PeOperation pe;
+	pe.LoadExeFile(path, peinfo);
+
+	if (pe.IsPEFile(peinfo->FileBuffer) == FALSE) {
+		return;
+	}
+
+	// 以不执行 DllMain 的方式加载模块到当前的内存中
+	DllBase = (DWORD)LoadLibraryExA(DllNameTable[0].c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES);
+
+	GetPackDefaultCodeSection();
+
+	// 从 dll 中获取到 start 函数，并计算它的页内偏移(加载基址 + 区段基址 + 段内偏移)
+	DWORD Start = (DWORD)GetProcAddress((HMODULE)DllBase, "start");
+	StartOffset = Start - DllBase - GetSection(DllBase, PackDefaultCode.c_str())->VirtualAddress;
+
+	// 获取到共享信息
+	ShareData = (PSHAREDATA)GetProcAddress((HMODULE)DllBase, "ShareData");
+
+
+}
 
 WinPack::WinPack(std::string path, std::string fileName)
 {	
@@ -455,10 +484,10 @@ void WinPack::EncryptAllSection()
 
 	unsigned char key1[] =
 	{
-		0xab, 0x74, 0xf5, 0x36,
-		0x28, 0xae, 0xd2, 0xa4,
-		0xaa, 0xf7, 0x15, 0x82,
-		0x19, 0x2b, 0x44, 0x3c
+		0xab, 0x72, 0xf5, 0xa6,
+		0x28, 0xae, 0xd2, 0x34,
+		0xaa, 0x57, 0x15, 0x82,
+		0x19, 0x2c, 0xa4, 0x3c
 	};
 
 	//初始化aes对象

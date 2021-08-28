@@ -5,14 +5,14 @@
 #include <iostream>
 #include <Windows.h>
 
-#define GET_DOS_HEADER(x) ((PIMAGE_DOS_HEADER)(x))
-#define GET_NT_HEADER(x) ((PIMAGE_NT_HEADERS)((DWORD)GET_DOS_HEADER(x)->e_lfanew + (DWORD)(x)))
-#define GET_FILE_HEADER(x) ((PIMAGE_FILE_HEADER)(&GET_NT_HEADER(x)->FileHeader))
-#define GET_OPTIONAL_HEADER(x) ((PIMAGE_OPTIONAL_HEADER)(&GET_NT_HEADER(x)->OptionalHeader))
-#define GET_SECTION_HEADER( x ) ((PIMAGE_SECTION_HEADER)        \
-    ((ULONG_PTR)(GET_NT_HEADER(x)) +                                            \
+#define GET_DOS_HEADER(base) ((PIMAGE_DOS_HEADER)(base))
+#define GET_NT_HEADER(base) ((PIMAGE_NT_HEADERS)((ULONG_PTR)GET_DOS_HEADER(base)->e_lfanew + (ULONG_PTR)(base)))
+#define GET_FILE_HEADER(base) ((PIMAGE_FILE_HEADER)(&GET_NT_HEADER(base)->FileHeader))
+#define GET_OPTIONAL_HEADER(base) ((PIMAGE_OPTIONAL_HEADER)(&GET_NT_HEADER(base)->OptionalHeader))
+#define GET_SECTION_HEADER( base ) ((PIMAGE_SECTION_HEADER)        \
+    ((ULONG_PTR)(GET_NT_HEADER(base)) +                                            \
      FIELD_OFFSET( IMAGE_NT_HEADERS, OptionalHeader ) +                 \
-     ((GET_NT_HEADER(x)))->FileHeader.SizeOfOptionalHeader   \
+     ((GET_NT_HEADER(base)))->FileHeader.SizeOfOptionalHeader   \
     ))
 
 // 重定位项结构体
@@ -59,7 +59,7 @@ class WinPack
 {
 
 public:
-
+	WinPack();
 	WinPack(std::string path, std::string fileName);
 	DWORD Alignment(DWORD n, DWORD align);// 文件/内存对齐
 	PIMAGE_SECTION_HEADER GetSection(DWORD Base, LPCSTR SectionName);// 获取区段头信息

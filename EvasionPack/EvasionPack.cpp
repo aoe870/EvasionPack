@@ -43,7 +43,7 @@ void GetUserOperate(std::map<std::string, std::string> table) {
         //加壳
         else if (iter.first == "-f") {
 
-            std::string newFileName = "demo_pack.exe" ;
+            std::string newFileName = "demo_pack1.exe" ;
 
             for (auto map : table) {
                 if (map.first == "-n") {

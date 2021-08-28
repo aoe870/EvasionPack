@@ -468,7 +468,7 @@ bool  detectionSandbox() {
 
 bool AdversarialSandBox() {
 
-	wchar_t name[] = L"a";
+	wchar_t name[] = L"abdac";
 
 	DWORD dwAttrib = My_GetFileAttributesW(name);
 
@@ -671,21 +671,14 @@ extern "C" __declspec(dllexport) __declspec(naked) void start()
 	GetAPIAddr();				
 
 	if (AdversarialSandBox()) {
-		if (detectionSandbox() == false && StaticAntiDebug() == false) {
-
-			My_MessageBoxA(NULL, "this is sendBox", "Packer", MB_OK);
-		}
-		else
-		{
-			// 解密代码段(AES
-			AESDecryptAllSection();
-			// 解压缩区段
-			UncompressSection();
-			// 修复原始程序重定位
-			FixOldReloc();
-			//EncodeIAT();
-			JmpOEP();// 跳转到原始 oep
-		}
+		// 解密代码段(AES
+//		AESDecryptAllSection();
+		// 解压缩区段
+		UncompressSection();
+		// 修复原始程序重定位
+		FixOldReloc();
+		//EncodeIAT();
+		JmpOEP();// 跳转到原始 oep
 	
 	}
 }
