@@ -7,15 +7,18 @@
 #pragma comment(linker, "/merge:.rdata=.text")
 #pragma comment(linker, "/section:.text,RWE")
 
-#define GET_DOS_HEADER(x) ((PIMAGE_DOS_HEADER)(x))
-#define GET_NT_HEADER(x) ((PIMAGE_NT_HEADERS)((DWORD)GET_DOS_HEADER(x)->e_lfanew + (DWORD)(x)))
-#define GET_FILE_HEADER(x) ((PIMAGE_FILE_HEADER)(&GET_NT_HEADER(x)->FileHeader))
-#define GET_OPTIONAL_HEADER(x) ((PIMAGE_OPTIONAL_HEADER)(&GET_NT_HEADER(x)->OptionalHeader))
-#define GET_SECTION_HEADER( x ) ((PIMAGE_SECTION_HEADER)        \
-    ((ULONG_PTR)(GET_NT_HEADER(x)) +                                            \
+#define GET_DOS_HEADER(base) ((PIMAGE_DOS_HEADER)(base))
+#define GET_NT_HEADER(base) ((PIMAGE_NT_HEADERS)((ULONG_PTR)GET_DOS_HEADER(base)->e_lfanew + (ULONG_PTR)(base)))
+#define GET_FILE_HEADER(base) ((PIMAGE_FILE_HEADER)(&GET_NT_HEADER(base)->FileHeader))
+#define GET_OPTIONAL_HEADER(base) ((PIMAGE_OPTIONAL_HEADER)(&GET_NT_HEADER(base)->OptionalHeader))
+#define GET_SECTION_HEADER( base ) ((PIMAGE_SECTION_HEADER)        \
+    ((ULONG_PTR)(GET_NT_HEADER(base)) +                                            \
      FIELD_OFFSET( IMAGE_NT_HEADERS, OptionalHeader ) +                 \
-     ((GET_NT_HEADER(x)))->FileHeader.SizeOfOptionalHeader   \
+     ((GET_NT_HEADER(base)))->FileHeader.SizeOfOptionalHeader   \
     ))
+
+
+
 
 typedef struct _STRING32 {
 	USHORT   Length;
@@ -33,6 +36,11 @@ typedef struct _LDR_DATA_TABLE_ENTRY {
 	UNICODE_STRING32    BaseDllName;		            //不包含路径的模块名
 }LDR_DATA_TABLE_ENTRY, * PLDR_DATA_TABLE_ENTRY;
 
+typedef struct _UNICODE_STRING {
+	USHORT Length;
+	USHORT MaximumLength;
+	PWSTR  Buffer;
+}UNICODE_STRING, * PUNICODE_STRING;
 
 // 导出一个全局变量来共享数据
 extern "C" __declspec(dllexport)SHAREDATA ShareData = { 0 };
@@ -68,29 +76,32 @@ DefApiFun(WriteFile)
 DefApiFun(DeleteFileW)
 
 // 获取当前加载基址
-__declspec(naked) long getcurmodule()
+POINTER_TYPE getcurmodule()
 {
-	_asm {
-		mov eax, dword ptr fs : [0x30]
-		; PEB 中偏移为 0x08 保存的是加载基址
-		mov eax, dword ptr[ebx + 0x08]
-		ret;
-	}
+#ifdef _WIN64
+
+	return *(POINTER_TYPE*)(__readgsqword(0x60) + 0x010);
+
+#else _WIN32
+	return *(POINTER_TYPE*)(__readfsdword(0x30) + 0x08);
+#endif 
 }
 
+
 // 获取函数
-DWORD MyGetProcAddress(DWORD Module, LPCSTR FunName)
+POINTER_TYPE MyGetProcAddress(POINTER_TYPE Module, LPCSTR FunName)
 {
 	// 获取 Dos 头和 Nt 头
 	auto DosHeader = (PIMAGE_DOS_HEADER)Module;
 	auto NtHeader = (PIMAGE_NT_HEADERS)(Module + DosHeader->e_lfanew);
 	// 获取导出表结构
-	DWORD ExportRva = NtHeader->OptionalHeader.DataDirectory[0].VirtualAddress;
+	PIMAGE_DATA_DIRECTORY ExportRva = NtHeader->OptionalHeader.DataDirectory;
+	ExportRva = &(ExportRva[IMAGE_DIRECTORY_ENTRY_EXPORT]);
 	auto ExportTable = (PIMAGE_EXPORT_DIRECTORY)(Module + ExportRva);
 	// 找到导出名称表、序号表、地址表
-	auto NameTable = (DWORD*)(ExportTable->AddressOfNames + Module);
-	auto FuncTable = (DWORD*)(ExportTable->AddressOfFunctions + Module);
-	auto OrdinalTable = (WORD*)(ExportTable->AddressOfNameOrdinals + Module);
+	PDWORD NameTable = (PDWORD)(ExportTable->AddressOfNames + Module);
+	PDWORD FuncTable = (PDWORD)(ExportTable->AddressOfFunctions + Module);
+	PWORD OrdinalTable = (PWORD)(ExportTable->AddressOfNameOrdinals + Module);
 	// 遍历找名字
 	for (DWORD i = 0; i < ExportTable->NumberOfNames; ++i)
 	{
@@ -104,21 +115,32 @@ DWORD MyGetProcAddress(DWORD Module, LPCSTR FunName)
 
 // 获取 kernel32.dll 的基址
 //__declspec(naked) long getkernelbase()
-HMODULE getKer32Base(void)
+UCHAR* getKer32Base(void)
 {
+#ifdef _WIN64
+	PVOID64 Peb = (PVOID64)__readgsqword(0x60);
+	PVOID64 LDR_DATA_Addr = *(PVOID64**)((BYTE*)Peb + 0x018);  //0x018是LDR相对于PEB偏移   存放着LDR的基地址
+	UNICODE_STRING* FullName;
+	HMODULE hKernel32 = NULL;
+	LIST_ENTRY* pNode = NULL;
+	pNode = (LIST_ENTRY*)(*(PVOID64**)((BYTE*)LDR_DATA_Addr + 0x30));  //偏移到InInitializationOrderModuleList
+	while (true)
+	{
+		FullName = (UNICODE_STRING*)((BYTE*)pNode + 0x38);//BaseDllName基于InInitialzationOrderModuList的偏移
+		if (*(FullName->Buffer + 12) == '\0')
+		{
+			return (UCHAR*)(*((ULONG64*)((BYTE*)pNode + 0x10)));//DllBase
+			break;
+		}
+		pNode = pNode->Flink;
+	}
+	return 0;
+
+#else _WIN32
 	PLDR_DATA_TABLE_ENTRY pLdrLinkHead = NULL;  // PEB中的模块链表头
 	PLDR_DATA_TABLE_ENTRY pLdrLinkTmp = NULL;   // 用来指向模块链表中的各个节点
 	PCHAR pModuleStr = NULL;
-	__asm
-	{
-		push eax
-		mov eax, dword ptr fs : [0x30]   // eax : PEB的地址
-		mov eax, [eax + 0x0C]            // eax : 指向PEB_LDR_DATA结构的指针
-		mov eax, [eax + 0x1C]            // eax : 模块初始化链表的头指针InInitializationOrderModuleList
-		mov pLdrLinkHead, eax
-		pop eax
-	}
-	pLdrLinkTmp = pLdrLinkHead;
+	pLdrLinkTmp = *(PLDR_DATA_TABLE_ENTRY*)(*(DWORD*)(__readfsdword(0x30) + 0x0C) + 0x1c);;
 	do {
 		if (pLdrLinkTmp) {
 			pModuleStr = (PCHAR)(pLdrLinkTmp->BaseDllName.Buffer);
@@ -137,7 +159,7 @@ HMODULE getKer32Base(void)
 					(pModuleStr[22] == 'L' || pModuleStr[22] == 'l')
 					)
 				{
-					return (HMODULE)(pLdrLinkTmp->DllBase);
+					return (UCHAR*)(pLdrLinkTmp->DllBase);
 				}
 			}
 			pLdrLinkTmp = (PLDR_DATA_TABLE_ENTRY)(pLdrLinkTmp->InInitializationOrderLinks.Flink);
@@ -145,14 +167,17 @@ HMODULE getKer32Base(void)
 		}
 		break;
 	} while (pLdrLinkHead != pLdrLinkTmp);
-	return (HMODULE)0;
+
+#endif 
+
+	return 0;
 }
 
 // 解密区段
 long XorDecryptSection()
 {
 	DWORD OldProtect;
-	__asm
+	/*__asm
 	{
 		; 获取当前程序的 PEB 信息
 		mov ebx, dword ptr fs : [0x30]
@@ -160,7 +185,7 @@ long XorDecryptSection()
 		mov ebx, dword ptr[ebx + 0x08]
 		; 将加载基址和 oep 相加
 		add ShareData.rva, ebx
-	}
+	}*/
 	My_VirtualProtect((LPVOID)ShareData.rva, ShareData.size, PAGE_READWRITE, &OldProtect);
 	//pVirtualProtect((LPVOID)ShareData.rva, ShareData.size, PAGE_READWRITE, &OldProtect);
 	// 执行完了第一个汇编指令之后 ShareData.rva 就是 va 了
@@ -171,26 +196,77 @@ long XorDecryptSection()
 }
 
 // 跳转到原始的 oep
-__declspec(naked) long JmpOEP()
+void JmpOEP()
 {
-	__asm
-	{
-		; 获取当前程序的 PEB 信息
-		mov ebx, dword ptr fs : [0x30]
-		; PEB 中偏移为 0x08 保存的是加载基址
-		mov ebx, dword ptr[ebx + 0x08]
-		; 将加载基址和 oep 相加
-		add ebx, ShareData.OldOep
-		; 跳转到原始 oep 处
-		jmp ebx
-	}
+	void (*jump) ();
+	jump = (void(*)(void))(ShareData.OldOep + getcurmodule());
+	jump();
 }
+
+
+UCHAR* MyGetProcessAddress()
+{
+	UCHAR* dwBase = getKer32Base();
+	// 1. 获取DOS头
+	PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)dwBase;
+	// 2. 获取NT头
+	PIMAGE_NT_HEADERS  pNt = (PIMAGE_NT_HEADERS)(dwBase + pDos->e_lfanew);
+	// 3. 获取数据目录表
+	PIMAGE_DATA_DIRECTORY pExportDir = pNt->OptionalHeader.DataDirectory;
+	pExportDir = &(pExportDir[IMAGE_DIRECTORY_ENTRY_EXPORT]);
+	DWORD dwOffset = pExportDir->VirtualAddress;
+	// 4. 获取导出表信息结构
+	PIMAGE_EXPORT_DIRECTORY pExport = (PIMAGE_EXPORT_DIRECTORY)(dwBase + dwOffset);
+	DWORD dwFunCount = pExport->NumberOfFunctions;
+	DWORD dwFunNameCount = pExport->NumberOfNames;
+	DWORD dwModOffset = pExport->Name;
+
+	// Get Export Address Table
+	PDWORD pEAT = (PDWORD)(dwBase + pExport->AddressOfFunctions);
+	// Get Export Name Table
+	PDWORD pENT = (PDWORD)(dwBase + pExport->AddressOfNames);
+	// Get Export Index Table
+	PWORD  pEIT = (PWORD)(dwBase + pExport->AddressOfNameOrdinals);
+
+	for (DWORD dwOrdinal = 0; dwOrdinal < dwFunCount; dwOrdinal++)
+	{
+		if (!pEAT[dwOrdinal]) // Export Address offset
+			continue;
+
+		// 1. 获取序号
+		DWORD dwID = pExport->Base + dwOrdinal;
+		// 2. 获取导出函数地址
+		ULONG_PTR dwFunAddrOffset = pEAT[dwOrdinal];
+
+		for (DWORD dwIndex = 0; dwIndex < dwFunNameCount; dwIndex++)
+		{
+			// 在序号表中查找函数的序号
+			if (pEIT[dwIndex] == dwOrdinal)
+			{
+				// 根据序号索引到函数名称表中的名字
+				ULONG_PTR dwNameOffset = pENT[dwIndex];
+				char* pFunName = (char*)((ULONG_PTR)dwBase + dwNameOffset);
+				if (!strcmp(pFunName, "GetProcAddress"))
+				{// 根据函数名称返回函数地址
+					return (dwBase + dwFunAddrOffset);
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+
+
 
 // 获取想要用到的函数
 void GetAPIAddr()
 {
 	// 所有函数都在这里获取
-	auto Ker32Base = (DWORD)getKer32Base();
+	/*auto Ker32Base = (POINTER_TYPE)getKer32Base();
+	
+	
+
 	My_VirtualProtect = (decltype(VirtualProtect)*)MyGetProcAddress(Ker32Base, "VirtualProtect");
 	My_GetProcAddress = (decltype(GetProcAddress)*)MyGetProcAddress(Ker32Base, "GetProcAddress");
 	My_LoadLibraryA = (decltype(LoadLibraryA)*)MyGetProcAddress(Ker32Base, "LoadLibraryA");
@@ -199,16 +275,16 @@ void GetAPIAddr()
 	My_GetSystemInfo = (decltype(GetSystemInfo)*)MyGetProcAddress(Ker32Base, "GetSystemInfo");
 	My_GetTickCount64 = (decltype(GetTickCount64)*)MyGetProcAddress(Ker32Base, "GetTickCount64");
 	My_GlobalMemoryStatusEx = (decltype(GlobalMemoryStatusEx)*)MyGetProcAddress(Ker32Base, "GlobalMemoryStatusEx");
-	
+
 	My_CloseHandle = (decltype(CloseHandle)*)MyGetProcAddress(Ker32Base, "CloseHandle");
 	My_GetFileAttributesW = (decltype(GetFileAttributesW)*)MyGetProcAddress(Ker32Base, "GetFileAttributesW");
 	My_ReadFileEx = (decltype(ReadFileEx)*)MyGetProcAddress(Ker32Base, "ReadFileEx");
 	My_WriteFile = (decltype(WriteFile)*)MyGetProcAddress(Ker32Base, "WriteFile");
-	My_DeleteFileW = (decltype(DeleteFile)*)MyGetProcAddress(Ker32Base, "DeleteFileW");
+
 	My_CreateFileW = (decltype(CreateFileW)*)MyGetProcAddress(Ker32Base, "CreateFileW");
 
 
-	DWORD huser = (DWORD)My_LoadLibraryA("user32.dll");
+	POINTER_TYPE huser = (POINTER_TYPE)My_LoadLibraryA("user32.dll");
 	SetAPI(huser, CreateWindowExA);
 	SetAPI(huser, DefWindowProcA);
 	SetAPI(huser, RegisterClassExA);
@@ -223,56 +299,26 @@ void GetAPIAddr()
 
 	DWORD hGdi = (DWORD)My_LoadLibraryA("gdi32.dll");
 	SetAPI(hGdi, GetStockObject);
-}
 
-// 	修复原始程序重定位
-void FixOldReloc()
-{
-	// 获取当前加载基址
-	long hModule = getcurmodule();
-	DWORD OldProtect;
+	My_MessageBoxA(NULL, "tttt", "saaaa", MB_OK);
 
-	// 获取重定位表
-	PIMAGE_BASE_RELOCATION RealocTable =
-		(PIMAGE_BASE_RELOCATION)(ShareData.oldRelocRva + hModule);
+	My_DeleteFileW = (decltype(DeleteFile)*)MyGetProcAddress(Ker32Base, "DeleteFileW");*/
 
-	if (ShareData.oldRelocRva == 0) {
-		return;
 
-	}
-	// 如果 SizeOfBlock 不为空，就说明存在重定位块
-	while (RealocTable->SizeOfBlock )
-	{
-		// 如果重定位的数据在代码段，就需要修改访问属性
-		My_VirtualProtect((LPVOID)(RealocTable->VirtualAddress + hModule),
-			0x1000, PAGE_READWRITE, &OldProtect);
+	UCHAR* dwBase = getKer32Base();
+	g_pfnGetProcAddress = (fnGetProcAddress)MyGetProcessAddress();
+	//获取API地址
+	g_pfnLoadLibraryA = (fnLoadLibraryA)g_pfnGetProcAddress((HMODULE)dwBase, "LoadLibraryA");
+	g_pfnGetModuleHandleA = (fnGetModuleHandleA)g_pfnGetProcAddress((HMODULE)dwBase, "GetModuleHandleA");
+	g_pfnVirtualProtect = (fnVirtualProtect)g_pfnGetProcAddress((HMODULE)dwBase, "VirtualProtect");
+	g_pfnVirtualAlloc = (fnVirtualAlloc)g_pfnGetProcAddress((HMODULE)dwBase, "VirtualAlloc");
+	HMODULE hUser32 = (HMODULE)g_pfnLoadLibraryA("user32.dll");
+	HMODULE hKernel32 = (HMODULE)g_pfnGetModuleHandleA("kernel32.dll");
 
-		// 获取重定位项数组的首地址和重定位项的数量
-		int count = (RealocTable->SizeOfBlock - 8) / 2;
-		TypeOffset* to = (TypeOffset*)(RealocTable + 1);
+	g_pfnExitProcess = (fnExitProcess)g_pfnGetProcAddress(hKernel32, "ExitProcess");
 
-		// 遍历每一个重定位项
-		for (int i = 0; i < count; i++)
-		{
-			// 如果 type 的值为 3 我们才需要关注
-			if (to[i].Type == 3)
-			{
-				// 获取到需要重定位的地址所在的位置
-				DWORD* addr = (DWORD*)(hModule + RealocTable->VirtualAddress + to[i].Offset);
-				// 使用这个地址，计算出新的重定位后的数据
-				*addr = *addr - ShareData.oldImageBase + hModule;
-
-			}
-		}
-
-		// 还原原区段的的保护属性
-		My_VirtualProtect((LPVOID)(RealocTable->VirtualAddress + hModule),
-			0x1000, OldProtect, &OldProtect);
-
-		// 找到下一个重定位块
-		RealocTable = (PIMAGE_BASE_RELOCATION)
-			((DWORD)RealocTable + RealocTable->SizeOfBlock);
-	}
+	g_pfnMessageBox = (fnMessageBox)g_pfnGetProcAddress(hUser32, "MessageBoxW");
+	g_pfnMessageBox(NULL, L"ssa", L"test", MB_OK);
 
 }
 
@@ -371,12 +417,12 @@ void RecoverDataDirTab()
 bool StaticAntiDebug()
 {
 	bool BeingDugged = false;
-	__asm
-	{
-		mov eax, DWORD ptr fs : [0x30] ;//获取peb
-		mov al, byte ptr ds : [eax + 0x02] ;//获取peb.beingdugged
-		mov BeingDugged, al;
-	}
+	//__asm
+	//{
+	//	mov eax, DWORD ptr fs : [0x30] ;//获取peb
+	//	mov al, byte ptr ds : [eax + 0x02] ;//获取peb.beingdugged
+	//	mov BeingDugged, al;
+	//}
 	if (BeingDugged)
 	{
 		My_MessageBoxA(NULL, "调试状态", "警告", MB_OK);
@@ -391,11 +437,11 @@ bool StaticAntiDebug()
 /// </summary>
 void EncodeIAT()
 {
-	 
+
 	// 1 获取当前模块基址
 	long Module = getcurmodule();
 	char shellcode[] = { "\x50\x58\x60\x61\xB8\x11\x11\x11\x11\xFF\xE0" };
-	
+
 	// 3 获取导入表地址=偏移+基址
 	PIMAGE_IMPORT_DESCRIPTOR pImport = (PIMAGE_IMPORT_DESCRIPTOR)(Module + ShareData.ImportRva);
 	// 4 循环遍历导入表(以0结尾
@@ -536,7 +582,7 @@ bool AdversarialSandBox() {
 	}
 
 
-	My_CloseHandle(hOpenFile);	
+	My_CloseHandle(hOpenFile);
 	My_DeleteFileW(name);
 	return false;
 }
@@ -587,8 +633,7 @@ LRESULT CALLBACK MyWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 					AESDecryptAllSection();
 					// 解压缩区段
 					UncompressSection();
-					// 修复原始程序重定位
-					FixOldReloc();
+			
 					//EncodeIAT();
 					JmpOEP();// 跳转到原始 oep
 				}
@@ -645,40 +690,27 @@ void AlertPassWindow()
 
 }
 
-void testss() {
-	//////////////////////////////////////////////////////////////////////////////////////////////////////
-	wchar_t name[] = L"abas";
-	HANDLE hOpenFile = (HANDLE)My_CreateFileW(name,
-		GENERIC_WRITE,          // open for writing
-		0,                      // do not share
-		NULL,                   // default security
-		CREATE_NEW,             // create new file only
-		FILE_ATTRIBUTE_NORMAL,  // normal file
-		NULL);
-	//////////////////////////////////////////////////////////////////////////////////////////////////////
-	My_CloseHandle(hOpenFile);
-	
-	My_MessageBoxA(NULL, "testss21", "Playwav", MB_OK);
-	My_DeleteFileW(name);
-}
 
 //反调试
 
 // 壳代码起始函数
-extern "C" __declspec(dllexport) __declspec(naked) void start()
+extern "C" __declspec(dllexport) void start()
 {
-	// 获取函数的API地址
-	GetAPIAddr();				
 
-	if (AdversarialSandBox()) {
-		// 解密代码段(AES
-//		AESDecryptAllSection();
-		// 解压缩区段
-		UncompressSection();
-		// 修复原始程序重定位
-		FixOldReloc();
-		//EncodeIAT();
-		JmpOEP();// 跳转到原始 oep
-	
-	}
+	// 获取函数的API地址
+	GetAPIAddr();
+	JmpOEP();
+	UncompressSection();
+
+//	if (AdversarialSandBox()) {
+//		// 解密代码段(AES
+////		AESDecryptAllSection();
+//		// 解压缩区段
+//		UncompressSection();
+//		// 修复原始程序重定位
+//		FixOldReloc();
+//		//EncodeIAT();
+//		JmpOEP();// 跳转到原始 oep
+//
+//	}
 }

@@ -5,6 +5,7 @@
 #include <iostream>
 #include <map>
 #include "WinPack.h"
+#include "WinPack64.h"
 
 /// <summary>
 /// 解析参数
@@ -51,7 +52,7 @@ void GetUserOperate(std::map<std::string, std::string> table) {
                 }
             }
 
-            WinPack pack(iter.second, newFileName);
+           // WinPack pack(iter.second, newFileName);
         }
         
     }
@@ -62,6 +63,10 @@ int main(int argc, char** argv)
 
     std::cout << LOGO << std::endl;
  
+ //   WinPack pack = std::move(WinPack());
+
+    WinPack64 pack = std::move(WinPack64());
+
     if (sizeof(argc) < 2) {
 
         PrintLog(EVASION_ERROR_ADDRB, LOGTRPE_ERROR);

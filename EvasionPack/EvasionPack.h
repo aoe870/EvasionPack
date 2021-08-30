@@ -20,3 +20,5 @@
 #else
 #define POINTER_TYPE DWORD
 #endif
+
+

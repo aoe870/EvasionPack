@@ -80,6 +80,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <OutDir>..\output</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
@@ -95,7 +96,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -149,6 +150,7 @@
     <ClCompile Include="lz4.cpp" />
     <ClCompile Include="PeOperation.cpp" />
     <ClCompile Include="WinPack.cpp" />
+    <ClCompile Include="Winpack64.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AES.h" />
@@ -158,6 +160,7 @@
     <ClInclude Include="PeOperation.h" />
     <ClInclude Include="Tooltip.h" />
     <ClInclude Include="WinPack.h" />
+    <ClInclude Include="Winpack64.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -32,13 +32,7 @@ typedef struct PEInformation
 
 class PeOperation 
 {
-	TCHAR s[100];//时间戳
-public:
-	PeOperation();
-	~PeOperation();
-public:
-	//时间戳转换为标准时间
-	TCHAR* Stamp_To_Standard(DWORD stampTime);
+
 public:
 	/*////////////////////////////////////////////////////////////////
 	*※※*  FullName:		AlignSize － 取整对齐函数
@@ -55,19 +49,6 @@ public:
 		//return (uSize % uSecAlignment == 0) ? uSize : (uSize - (uSize % uSecAlignment) + uSecAlignment);
 		return ((uSize + uSecAlignment - 1) / uSecAlignment * uSecAlignment);
 	};
-
-
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:		IsPEFile - 判断是否是64位或者32位的PE文件
-	*※※*  Returns:		成功返回1，失败返回0
-	*※※*  Parameter_1:	pFileBuffer,模块文件在内存中的地址
-	*※※*  Parameter_2:	hwndDlg，可选参数，是窗口句柄
-	*※※*  Parameter_3:
-	*※※*  Parameter_4:
-	*※※*	Parameter_5:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	BOOLEAN IsPEFile(POINTER_TYPE, pFileBuffer);
 
 public:
 
@@ -95,33 +76,6 @@ public:
 	*※※*	Author:		    LCH
 	*/////////////////////////////////////////////////////////////////;
 	BOOL RebuildImportTable(POINTER_TYPE buff);
-
-
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:		StretchFile - 拉伸文件
-	*※※*  Returns:		成功返回新地址，失败返回0
-	*※※*  Parameter_1:	pFileBuff，模块地址
-	*※※*  Parameter_2:	FileSize,镜像大小
-	*※※*  Parameter_3:
-	*※※*  Parameter_4:
-	*※※*	Parameter_5:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	POINTER_TYPE StretchFile(POINTER_TYPE pFileBuff, DWORD FileSize);
-
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:		ImageBuff_To_FileBuff - 把PE文件还原成文件磁盘大小
-	*※※*  Returns:		成功返回新地址，失败返回0
-	*※※*  Parameter_1:	imgbuffer，模块地址
-	*※※*  Parameter_2:	length，文件大小
-	*※※*  Parameter_3:
-	*※※*  Parameter_4:
-	*※※*	Parameter_5:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	char* ImageBuff_To_FileBuff(char* imgbuffer, DWORD length);
-
-
 
 	/*////////////////////////////////////////////////////////////////
 	*※※*  FullName:		GET_HEADER_DICTIONARY
@@ -180,7 +134,7 @@ public:
 
 
 	/// <summary>
-	/// /////////////////////////////////////////////////////////////////
+	/// 加载PE文件
 	/// </summary>
 	/// <param name="FileName"></param>
 	/// <param name="Peinfo"></param>
@@ -188,13 +142,33 @@ public:
 	BOOLEAN LoadExeFile(TCHAR* FileName, PEInformation* Peinfo);// 读取目标程序
 
 	/// <summary>
-	/// 
+	/// 判断是否是PE文件
 	/// </summary>
 	/// <param name=""></param>
 	/// <param name=""></param>
 	/// <returns></returns>
 	BOOLEAN IsPEFile(POINTER_TYPE pFileBuffer);
 
+
+	/// <summary>
+	/// 获取Pe文件信息
+	/// </summary>
+	/// <param name="Peinfo"></param>
+	/// <returns></returns>
+	BOOLEAN GetPeInfo(POINTER_TYPE Pe, PEInformation* Peinfo);
+
+	void SaveFile(PEInformation Peinfo);
+
+
+	void AddSection(POINTER_TYPE Base, POINTER_TYPE DllBase, PEInformation* Peinfo);
+
+
+	PIMAGE_SECTION_HEADER GetSection(POINTER_TYPE Base, LPCSTR SectionName);
+
+
+	VOID FixReloc(POINTER_TYPE Base, POINTER_TYPE DllBase);
+
+	VOID CopySectionData(POINTER_TYPE Base, POINTER_TYPE DllBase);
 };
 
 #endif
