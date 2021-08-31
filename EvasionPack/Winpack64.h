@@ -27,31 +27,20 @@ struct TypeOffsets
 typedef struct _SHAREDATAA
 {
 	POINTER_TYPE OldOep = 0;// 原始 oep
-	long rva = 0;// 加密的rva
-	long size = 0;// 加密的大小
-	BYTE key = 0;// 加密的 key
+	POINTER_TYPE rva[10] = {};// 加密的rva
+	long size[10] = {};// 加密的大小
+	BYTE key[10] = {};// 加密的 key
+
 	long oldRelocRva = 0;// 原始重定位表位置
 	long oldImageBase = 0;// 原始加载基址
 
-	DWORD FrontCompressRva;//0
+	POINTER_TYPE FrontCompressRva;//0
 	DWORD FrontCompressSize;//1
 	DWORD LaterCompressSize;//2
 
 	unsigned char key1[16] = {};//AES解密密钥
 	int index = 0;			  //加密的区段数量 用的时候需要-1
 	int data[20][2];  //加密的区段RVA和Size	
-
-	int index2 = 0;			  //加密的区段数量 用的时候需要-1
-	int data2[20][2];  //加密的区段RVA和Size	
-
-
-	DWORD dwDataDir[20][3];  //数据目录表的RVA和Size	
-	DWORD dwNumOfDataDir;	//数据目录表的个数
-
-	long ImportRva;
-
-	DWORD TlsCallbackFuncRva;
-	bool bIsTlsUseful;
 
 } SHAREDATAA, * PSHAREDATAA;
 
@@ -67,7 +56,6 @@ public:
 	void LoadExeFile(LPCSTR FileName);// 读取目标程序
 	void AddSection(LPCSTR SectionName, LPCSTR SrcName);//添加新区段
 	void FixReloc();// 修复壳重定位
-	void SetRelocTable();// 修改目标程序数据目标表，重定位表的位置到新重定位表（.stu_re）
 	void SetOEP();// 重新设置OEP
 	void CopySectionData(LPCSTR SectionName, LPCSTR SrcName);// 设置新区段内容(后者拷贝至前者
 	void SaveFile(LPCSTR FileName);// 另存新文件
@@ -89,6 +77,8 @@ private:
 	std::string DefaultCode = "";			//待加壳程序默认代码段
 	std::string PackRelocName = ".stu_re";	//壳的重定位代码段名称(加壳后)
 	std::string PackTestSection = ".pack";	//壳的默认代码段名称(加壳后)
+
+
 
 };
 #endif // PACK_WINPACK_H

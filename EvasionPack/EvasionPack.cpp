@@ -60,13 +60,12 @@ void GetUserOperate(std::map<std::string, std::string> table) {
 
 int main(int argc, char** argv)
 {
-
     std::cout << LOGO << std::endl;
  
  //   WinPack pack = std::move(WinPack());
 
     WinPack64 pack = std::move(WinPack64());
-
+    return 0;
     if (sizeof(argc) < 2) {
 
         PrintLog(EVASION_ERROR_ADDRB, LOGTRPE_ERROR);
@@ -75,5 +74,4 @@ int main(int argc, char** argv)
     std::map<std::string, std::string> paramTable;
     AnalyseParameter(argv, argc, paramTable);
     GetUserOperate(paramTable);
-    
 }

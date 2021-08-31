@@ -17,9 +17,6 @@
      ((GET_NT_HEADER(base)))->FileHeader.SizeOfOptionalHeader   \
     ))
 
-
-
-
 typedef struct _STRING32 {
 	USHORT   Length;
 	USHORT   MaximumLength;
@@ -91,26 +88,54 @@ POINTER_TYPE getcurmodule()
 // 获取函数
 POINTER_TYPE MyGetProcAddress(POINTER_TYPE Module, LPCSTR FunName)
 {
-	// 获取 Dos 头和 Nt 头
-	auto DosHeader = (PIMAGE_DOS_HEADER)Module;
-	auto NtHeader = (PIMAGE_NT_HEADERS)(Module + DosHeader->e_lfanew);
-	// 获取导出表结构
-	PIMAGE_DATA_DIRECTORY ExportRva = NtHeader->OptionalHeader.DataDirectory;
-	ExportRva = &(ExportRva[IMAGE_DIRECTORY_ENTRY_EXPORT]);
-	auto ExportTable = (PIMAGE_EXPORT_DIRECTORY)(Module + ExportRva);
-	// 找到导出名称表、序号表、地址表
-	PDWORD NameTable = (PDWORD)(ExportTable->AddressOfNames + Module);
-	PDWORD FuncTable = (PDWORD)(ExportTable->AddressOfFunctions + Module);
-	PWORD OrdinalTable = (PWORD)(ExportTable->AddressOfNameOrdinals + Module);
-	// 遍历找名字
-	for (DWORD i = 0; i < ExportTable->NumberOfNames; ++i)
+	// 1. 获取DOS头
+	PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)Module;
+	// 2. 获取NT头
+	PIMAGE_NT_HEADERS  pNt = (PIMAGE_NT_HEADERS)(Module + pDos->e_lfanew);
+	// 3. 获取数据目录表
+	PIMAGE_DATA_DIRECTORY pExportDir = pNt->OptionalHeader.DataDirectory;
+	pExportDir = &(pExportDir[IMAGE_DIRECTORY_ENTRY_EXPORT]);
+	DWORD dwOffset = pExportDir->VirtualAddress;
+	// 4. 获取导出表信息结构
+	PIMAGE_EXPORT_DIRECTORY pExport = (PIMAGE_EXPORT_DIRECTORY)(Module + dwOffset);
+	DWORD dwFunCount = pExport->NumberOfFunctions;
+	DWORD dwFunNameCount = pExport->NumberOfNames;
+	DWORD dwModOffset = pExport->Name;
+
+	// Get Export Address Table
+	PDWORD pEAT = (PDWORD)(Module + pExport->AddressOfFunctions);
+	// Get Export Name Table
+	PDWORD pENT = (PDWORD)(Module + pExport->AddressOfNames);
+	// Get Export Index Table
+	PWORD  pEIT = (PWORD)(Module + pExport->AddressOfNameOrdinals);
+
+	for (DWORD dwOrdinal = 0; dwOrdinal < dwFunCount; dwOrdinal++)
 	{
-		// 获取名字
-		char* Name = (char*)(NameTable[i] + Module);
-		if (!strcmp(Name, FunName))
-			return FuncTable[OrdinalTable[i]] + Module;
+		if (!pEAT[dwOrdinal]) // Export Address offset
+			continue;
+
+		// 1. 获取序号
+		DWORD dwID = pExport->Base + dwOrdinal;
+		// 2. 获取导出函数地址
+		ULONG_PTR dwFunAddrOffset = pEAT[dwOrdinal];
+
+		for (DWORD dwIndex = 0; dwIndex < dwFunNameCount; dwIndex++)
+		{
+			// 在序号表中查找函数的序号
+			if (pEIT[dwIndex] == dwOrdinal)
+			{
+				// 根据序号索引到函数名称表中的名字
+				ULONG_PTR dwNameOffset = pENT[dwIndex];
+				char* pFunName = (char*)((ULONG_PTR)Module + dwNameOffset);
+				if (!strcmp(pFunName, FunName))
+				{// 根据函数名称返回函数地址
+					return (Module + dwFunAddrOffset);
+				}
+			}
+		}
 	}
-	return -1;
+	return 0;
+
 }
 
 // 获取 kernel32.dll 的基址
@@ -174,25 +199,32 @@ UCHAR* getKer32Base(void)
 }
 
 // 解密区段
-long XorDecryptSection()
+void XorDecryptSection()
 {
-	DWORD OldProtect;
-	/*__asm
-	{
-		; 获取当前程序的 PEB 信息
-		mov ebx, dword ptr fs : [0x30]
-		; PEB 中偏移为 0x08 保存的是加载基址
-		mov ebx, dword ptr[ebx + 0x08]
-		; 将加载基址和 oep 相加
-		add ShareData.rva, ebx
-	}*/
-	My_VirtualProtect((LPVOID)ShareData.rva, ShareData.size, PAGE_READWRITE, &OldProtect);
-	//pVirtualProtect((LPVOID)ShareData.rva, ShareData.size, PAGE_READWRITE, &OldProtect);
-	// 执行完了第一个汇编指令之后 ShareData.rva 就是 va 了
-	for (int i = 0; i < ShareData.size; ++i)
-		((BYTE*)ShareData.rva)[i] ^= ShareData.key;
-	//pVirtualProtect((LPVOID)ShareData.rva, ShareData.size, OldProtect, &OldProtect);
-	My_VirtualProtect((LPVOID)ShareData.rva, ShareData.size, OldProtect, &OldProtect);
+	for (int iter = 0; iter <= ShareData.index; iter++) {
+		DWORD OldProtect;
+		auto va = ShareData.rva[iter] + getcurmodule();
+		auto size = ShareData.size[iter];
+		My_VirtualProtect((LPVOID)va, size, PAGE_READWRITE, &OldProtect);
+
+		for (int i = 0; i < size; ++i) {
+			((BYTE*)va)[i] ^= ShareData.key[iter];
+		}
+
+		My_VirtualProtect((LPVOID)va, size, OldProtect, &OldProtect);
+	}
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////
+
+	//ShareData.rva[1] = ShareData.rva[1] + getcurmodule();
+	//My_VirtualProtect((LPVOID)ShareData.rva[1], ShareData.size[1], PAGE_READWRITE, &OldProtect);
+	//// 执行完了第一个汇编指令之后 ShareData.rva 就是 va 了
+	//for (int i = 0; i < ShareData.size[1]; ++i)
+	//	((BYTE*)ShareData.rva)[i] ^= ShareData.key[1];
+
+	//My_VirtualProtect((LPVOID)ShareData.rva[1], ShareData.size[1], OldProtect, &OldProtect);
 }
 
 // 跳转到原始的 oep
@@ -257,16 +289,12 @@ UCHAR* MyGetProcessAddress()
 }
 
 
-
-
 // 获取想要用到的函数
 void GetAPIAddr()
 {
 	// 所有函数都在这里获取
-	/*auto Ker32Base = (POINTER_TYPE)getKer32Base();
+	auto Ker32Base = (POINTER_TYPE)getKer32Base();
 	
-	
-
 	My_VirtualProtect = (decltype(VirtualProtect)*)MyGetProcAddress(Ker32Base, "VirtualProtect");
 	My_GetProcAddress = (decltype(GetProcAddress)*)MyGetProcAddress(Ker32Base, "GetProcAddress");
 	My_LoadLibraryA = (decltype(LoadLibraryA)*)MyGetProcAddress(Ker32Base, "LoadLibraryA");
@@ -300,60 +328,10 @@ void GetAPIAddr()
 	DWORD hGdi = (DWORD)My_LoadLibraryA("gdi32.dll");
 	SetAPI(hGdi, GetStockObject);
 
-	My_MessageBoxA(NULL, "tttt", "saaaa", MB_OK);
-
-	My_DeleteFileW = (decltype(DeleteFile)*)MyGetProcAddress(Ker32Base, "DeleteFileW");*/
-
-
-	UCHAR* dwBase = getKer32Base();
-	g_pfnGetProcAddress = (fnGetProcAddress)MyGetProcessAddress();
-	//获取API地址
-	g_pfnLoadLibraryA = (fnLoadLibraryA)g_pfnGetProcAddress((HMODULE)dwBase, "LoadLibraryA");
-	g_pfnGetModuleHandleA = (fnGetModuleHandleA)g_pfnGetProcAddress((HMODULE)dwBase, "GetModuleHandleA");
-	g_pfnVirtualProtect = (fnVirtualProtect)g_pfnGetProcAddress((HMODULE)dwBase, "VirtualProtect");
-	g_pfnVirtualAlloc = (fnVirtualAlloc)g_pfnGetProcAddress((HMODULE)dwBase, "VirtualAlloc");
-	HMODULE hUser32 = (HMODULE)g_pfnLoadLibraryA("user32.dll");
-	HMODULE hKernel32 = (HMODULE)g_pfnGetModuleHandleA("kernel32.dll");
-
-	g_pfnExitProcess = (fnExitProcess)g_pfnGetProcAddress(hKernel32, "ExitProcess");
-
-	g_pfnMessageBox = (fnMessageBox)g_pfnGetProcAddress(hUser32, "MessageBoxW");
-	g_pfnMessageBox(NULL, L"ssa", L"test", MB_OK);
+	My_DeleteFileW = (decltype(DeleteFile)*)MyGetProcAddress(Ker32Base, "DeleteFileW");
 
 }
 
-// 解压缩区段
-void UncompressSection()
-{
-	// 1.待解压的位置
-	char* pSrc = (char*)(ShareData.FrontCompressRva + getcurmodule());
-
-	//2. 申请空间
-	char* pBuff = (char*)My_VirtualAlloc(0, ShareData.FrontCompressSize,
-		MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-
-	//3. 解压缩
-	LZ4_uncompress_unknownOutputSize(
-		pSrc,/*压缩后的数据*/
-		pBuff, /*解压出来的数据*/
-		ShareData.LaterCompressSize,/*压缩后的大小*/
-		ShareData.FrontCompressSize/*压缩前的大小*/);
-
-	//4.修改属性
-	DWORD OldProtect;
-	My_VirtualProtect(pSrc, ShareData.FrontCompressSize, PAGE_EXECUTE_READWRITE, &OldProtect);
-
-	//5.写入原始数据
-	memcpy(pSrc, pBuff, ShareData.FrontCompressSize);
-
-	//6.恢复属性
-	My_VirtualProtect(pSrc, ShareData.FrontCompressSize, OldProtect, &OldProtect);
-
-
-	//7.释放空间
-	//MyVirtualFree(pBuff, 0, MEM_RELEASE);
-
-}
 
 /// <summary>
 /// 
@@ -362,7 +340,7 @@ void AESDecryptAllSection()
 {
 	//获取当前程序的基址
 	DWORD dwBase = getcurmodule();
-
+	
 	CAES aes(ShareData.key1);
 	//循环解密所有区段
 	DWORD old = 0;
@@ -371,113 +349,21 @@ void AESDecryptAllSection()
 		//拿到所有区段的首地址和大小
 		unsigned char* pSection = (unsigned char*)ShareData.data[i][0] + dwBase;
 		DWORD dwSectionSize = ShareData.data[i][1];
-
+	
 		//修改区段属性
 		My_VirtualProtect(pSection, dwSectionSize, PAGE_EXECUTE_READWRITE, &old);
-
+	
 		//解密代码段
 		aes.InvCipher(pSection, dwSectionSize);
-
+		for (int i = 0; i < dwSectionSize; ++i) {
+			//pSection[i] ^= ShareData.key[1];
+		}
+			
 		//把属性修改回去
 		My_VirtualProtect(pSection, dwSectionSize, old, &old);
 	}
 }
 
-// 恢复数据目录表信息
-void RecoverDataDirTab()
-{
-	// 1 获取当前程序基址
-	//char* dwBase = (char*)pfnGetMoudleHandleA(NULL);
-	DWORD dwBase = getcurmodule();
-	// 2 遍历数据目录表
-	DWORD dwNumOfDataDir = ShareData.dwNumOfDataDir;
-	DWORD dwOldAttr = 0;
-	PIMAGE_DATA_DIRECTORY pDataDirectory = (GET_OPTIONAL_HEADER(dwBase)->DataDirectory);
-	for (DWORD i = 0; i < dwNumOfDataDir; i++)
-	{
-		// 3 资源表无需修改
-		if (i == 2)
-		{
-			pDataDirectory++;
-			continue;
-		}
-		// 4 修改属性为可写
-		My_VirtualProtect(pDataDirectory, 0x8, PAGE_EXECUTE_READWRITE, &dwOldAttr);
-		// 5 恢复数据目录表项
-		pDataDirectory->VirtualAddress = ShareData.dwDataDir[i][0];
-		pDataDirectory->Size = ShareData.dwDataDir[i][1];
-		// 6 恢复原属性
-		My_VirtualProtect(pDataDirectory, 0x8, dwOldAttr, &dwOldAttr);
-		// 7 表项指针+1,继续遍历
-		pDataDirectory++;
-	}
-}
-
-// 静态反调试
-bool StaticAntiDebug()
-{
-	bool BeingDugged = false;
-	//__asm
-	//{
-	//	mov eax, DWORD ptr fs : [0x30] ;//获取peb
-	//	mov al, byte ptr ds : [eax + 0x02] ;//获取peb.beingdugged
-	//	mov BeingDugged, al;
-	//}
-	if (BeingDugged)
-	{
-		My_MessageBoxA(NULL, "调试状态", "警告", MB_OK);
-		My_ExitProcess(1);
-	}
-
-	return true;
-}
-
-/// <summary>
-/// 
-/// </summary>
-void EncodeIAT()
-{
-
-	// 1 获取当前模块基址
-	long Module = getcurmodule();
-	char shellcode[] = { "\x50\x58\x60\x61\xB8\x11\x11\x11\x11\xFF\xE0" };
-
-	// 3 获取导入表地址=偏移+基址
-	PIMAGE_IMPORT_DESCRIPTOR pImport = (PIMAGE_IMPORT_DESCRIPTOR)(Module + ShareData.ImportRva);
-	// 4 循环遍历导入表(以0结尾
-	while (pImport->Name)
-	{
-		// 5 加载相关dll
-		char* dllName = (char*)(pImport->Name + Module);
-		HMODULE Mod = My_LoadLibraryA(dllName);
-		// 6 获取INT/IAT地址
-		DWORD* pInt = (DWORD*)(pImport->OriginalFirstThunk + Module);
-		DWORD* pIat = (DWORD*)(pImport->FirstThunk + Module);
-		// 7 循环遍历INT(以0结尾
-		while (*pInt)// 其指向THUNK结构体,内部是联合体,不管哪个字段有效,都表示一个地址罢了
-		{
-			// 8 获取API地址
-			IMAGE_IMPORT_BY_NAME* FunName = (IMAGE_IMPORT_BY_NAME*)(*pInt + Module);
-			LPVOID Fun = My_GetProcAddress(Mod, FunName->Name);
-			// 9 申请空间保存"中转站"代码,并将真实地址写入
-			char* pbuff = (char*)My_VirtualAlloc(0, 100, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-			memcpy(pbuff, shellcode, sizeof(shellcode));// 假地址保存"中转站"代码
-			*(DWORD*)&pbuff[5] = (DWORD)Fun;// mov eax,真实地址,jmp eax=jmp 真实地址
-			// 10 向IAT填充假地址(可中转到真地址
-			DWORD old;
-			My_VirtualProtect(pIat, 4, PAGE_EXECUTE_READWRITE, &old);// 可写属性
-			*pIat = (DWORD)pbuff;// 不必管联合体字段,直接赋值到*p即可
-			My_VirtualProtect(pIat, 4, old, &old);// 恢复原属性
-			// 11 下个INT/IAT
-			pInt++;
-			pIat++;
-		}
-
-		// 12 下一个导入表
-		pImport++;
-	}
-
-}
 
 
 /// <summary>
@@ -588,129 +474,12 @@ bool AdversarialSandBox() {
 }
 
 
-// 回调函数
-LRESULT CALLBACK MyWndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
-{
-	// 保存编辑框句柄
-	static HWND Edithwnd = 0;
-
-	switch (msg)
-	{
-	case WM_CREATE:
-	{
-		// 创建窗口
-		HINSTANCE instance = (HINSTANCE)getcurmodule();
-
-		Edithwnd = My_CreateWindowExA(0, "edit", NULL, WS_VISIBLE | WS_CHILD | WS_BORDER, 100, 50, 120, 20,
-			hwnd, (HMENU)0x1000, instance, 0);
-		My_CreateWindowExA(0, "button", "确定", WS_VISIBLE | WS_CHILD, 50, 100, 60, 30, hwnd, (HMENU)0x1001, instance, 0);
-		My_CreateWindowExA(0, "button", "取消", WS_VISIBLE | WS_CHILD, 150, 100, 60, 30, hwnd, (HMENU)0x1002, instance, 0);
-		HWND hBit = My_CreateWindowExA(0, "static", "密码", WS_CHILD | WS_VISIBLE, 50, 50, 30, 20, hwnd, (HMENU)1003, instance, NULL);
-
-		break;
-	}
-	case WM_COMMAND:
-	{
-		// 按钮点击事件
-		if (wparam == 0x1001)
-		{
-
-			My_MessageBoxA(NULL, "check", "Packer", MB_OK);
-			char buff[100];
-			// 获取文本
-			My_GetWindowTextA(Edithwnd, buff, 100);
-			if (!strcmp(buff, "123"))
-			{
-
-				if (detectionSandbox() == false && StaticAntiDebug() == false) {
-
-					My_MessageBoxA(NULL, "this is sendBox", "Packer", MB_OK);
-
-				}
-				else
-				{
-					// 解密代码段(AES
-					AESDecryptAllSection();
-					// 解压缩区段
-					UncompressSection();
-			
-					//EncodeIAT();
-					JmpOEP();// 跳转到原始 oep
-				}
-
-				//退出窗口
-				My_PostQuitMessage(0);
-				My_ShowWindow(hwnd, SW_HIDE);
-				break;
-			}
-		}
-
-		break;
-	}
-
-	}
-
-	return My_DefWindowProcA(hwnd, msg, wparam, lparam);
-}
-
-// 显示窗口
-void AlertPassWindow()
-{
-	// 0 创建窗口类
-	WNDCLASSEXA ws = { sizeof(ws) };
-	ws.style = CS_HREDRAW | CS_VREDRAW;
-	ws.hInstance = (HINSTANCE)getcurmodule();
-	ws.lpfnWndProc = MyWndProc;
-	ws.hbrBackground = (HBRUSH)My_GetStockObject(WHITE_BRUSH);
-	ws.lpszClassName = "MyPack";
-
-	//1 .注册窗口类
-	My_RegisterClassExA(&ws);
-
-	//2. 创建窗口
-	HWND hwnd = My_CreateWindowExA(0,
-		"MyPack",
-		"MyPack",
-		WS_OVERLAPPEDWINDOW,
-		100, 100, 300, 200, NULL, NULL,
-		(HINSTANCE)getcurmodule(), NULL);
-
-	//3 . 显示更新
-	My_ShowWindow(hwnd, SW_SHOW);
-	My_UpdateWindow(hwnd);
-
-	//4. 消息循环
-	MSG msg;
-	while (My_GetMessageA(&msg, 0, 0, 0))
-	{
-		//5. 转换消息 分发消息 
-		My_TranslateMessage(&msg);
-		My_DispatchMessageA(&msg);
-	}
-
-}
-
-
-//反调试
-
 // 壳代码起始函数
 extern "C" __declspec(dllexport) void start()
 {
-
-	// 获取函数的API地址
 	GetAPIAddr();
-	JmpOEP();
-	UncompressSection();
-
-//	if (AdversarialSandBox()) {
-//		// 解密代码段(AES
-////		AESDecryptAllSection();
-//		// 解压缩区段
-//		UncompressSection();
-//		// 修复原始程序重定位
-//		FixOldReloc();
-//		//EncodeIAT();
-//		JmpOEP();// 跳转到原始 oep
-//
-//	}
+	if (AdversarialSandBox()) {
+		XorDecryptSection();
+		JmpOEP();
+	}
 }

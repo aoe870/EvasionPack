@@ -14,14 +14,19 @@ std::vector<std::string> DllNameTable{ "EvasionPackDll.dll" };
 WinPack64::WinPack64() {
 
 #ifdef _WIN64
-	std::string path = "../output/demoX64.exe";
-	std::string name = "../output/demoX64_pack.exe";
+	//std::string path = "../output/demoX64.exe";
+	//std::string name = "../output/demoX64_pack.exe";
+
+	std::string path = "../output/shell64.exe";
+	std::string name = "../output/shell64_pack.exe";
 #else
 	std::string path = "../output/demo.exe";
 	std::string name = "../output/demo_pack.exe";
+
+	//std::string path = "../output/shell32.exe";
+	//std::string name = "../output/shell32_pack.exe";
 #endif
 
-	
 	LoadExeFile(path.c_str());
 
 	// 2 添加新区段
@@ -33,11 +38,13 @@ WinPack64::WinPack64() {
 	// 修复壳重定位	
 	FixReloc();
 
-	//压缩区段
-	CompressSection(DefaultCode);
+	////压缩区段
+//	CompressSection(DefaultCode);
 
-	 //异或加密
-	EncryptAllSection();
+	// //异或加密
+	//EncryptAllSection();
+
+	XorSection(".text");
 
 	// 9 填充新区段内容
 	CopySectionData(PackTestSection.c_str(), PackDefaultCode.c_str());
@@ -45,6 +52,7 @@ WinPack64::WinPack64() {
 	// 10 另存为新文件
 	SaveFile(name.c_str());
 
+	return;
 }
 
 /// <summary>
@@ -122,7 +130,7 @@ VOID WinPack64::LoadExeFile(LPCSTR FileName)
 	GetDefaultCodeSection();
 
 	///////////////////////////////////////////
-	auto tmp = LoadLibrary(L"../output/EvasionPackDll.dll");
+	
 	// 以不执行 DllMain 的方式加载模块到当前的内存中
 	DllBase = (POINTER_TYPE)LoadLibraryExA(DllNameTable[0].c_str(), NULL, DONT_RESOLVE_DLL_REFERENCES);
 
@@ -190,38 +198,43 @@ VOID WinPack64::FixReloc()
 	DWORD Size = 0, OldProtect = 0;
 
 	// 获取到程序的重定位表
-	auto RealocTable = (PIMAGE_BASE_RELOCATION)
-		ImageDirectoryEntryToData((PVOID)DllBase, TRUE, 5, &Size);
+	PIMAGE_DATA_DIRECTORY pDataDirectory = GET_OPTIONAL_HEADER(DllBase)->DataDirectory;
+	auto RealocTable = (PIMAGE_BASE_RELOCATION)((POINTER_TYPE)DllBase + pDataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+
 
 	// 如果 SizeOfBlock 不为空，就说明存在重定位块
 	while (RealocTable->SizeOfBlock)
 	{
+	
 		// 如果重定位的数据在代码段，就需要修改访问属性
 		VirtualProtect((LPVOID)(RealocTable->VirtualAddress + DllBase),
 			0x1000, PAGE_READWRITE, &OldProtect);
-
+		
 		// 获取重定位项数组的首地址和重定位项的数量
 		int count = (RealocTable->SizeOfBlock - 8) / 2;
 		TypeOffsets* to = (TypeOffsets*)(RealocTable + 1);
-
+		
 		// 遍历每一个重定位项，输出内容
 		for (int i = 0; i < count; i++)
 		{
 			// 如果 type 的值为 3 我们才需要关注
 			if (to[i].Type == 3)
 			{
+							
 				// 获取到需要重定位的地址所在的位置
 				POINTER_TYPE* addr = (POINTER_TYPE*)(DllBase + RealocTable->VirtualAddress + to[i].Offset);
 
 				// 计算出不变的段内偏移 = *addr - imagebase - .text va
 				POINTER_TYPE item = *addr - DllBase - GetSection(DllBase, PackDefaultCode.c_str())->VirtualAddress;
 
+
 				// 使用这个地址，计算出新的重定位后的数据
 				*addr = item + GET_OPTIONAL_HEADER(FileBase)->ImageBase + GetSection(FileBase, PackTestSection.c_str())->VirtualAddress;
-				// printf("\t%08x - %08X - %08X\n", addr, *addr, item);
+				
+				
 			}
 		}
-
+		
 		// 还原原区段的的保护属性
 		VirtualProtect((LPVOID)(RealocTable->VirtualAddress + DllBase),
 			0x1000, OldProtect, &OldProtect);
@@ -285,6 +298,10 @@ VOID WinPack64::CopySectionData(LPCSTR SectionName, LPCSTR SrcName)
 	memcpy(DestData, SrcData, GetSection(DllBase, SrcName)->SizeOfRawData);
 }
 
+/// <summary>
+/// 
+/// </summary>
+/// <param name="FileName"></param>
 VOID WinPack64::SaveFile(LPCSTR FileName)
 {
 	// 无论文件是否存在，都要创建新的文件
@@ -298,84 +315,6 @@ VOID WinPack64::SaveFile(LPCSTR FileName)
 	// 为了防止句柄泄露应该关闭句柄
 	CloseHandle(FileHandle);
 }
-
-/// <summary>
-/// 压缩区段
-/// </summary>
-/// <param name="SectionName"></param>
-/// <returns></returns>
-bool WinPack64::CompressSection(std::string SectionName)
-{
-	// 获取这个区段信息
-	PIMAGE_SECTION_HEADER pSection = GetSection(FileBase, SectionName.c_str());
-	// 压缩前位置
-	char* pRoffset = (char*)(pSection->PointerToRawData + FileBase);
-	// 区段在文件中的大小
-	long lSize = pSection->SizeOfRawData;
-
-	// 0 保存压缩前信息
-	// 压缩数据的RVA
-	ShareData->FrontCompressRva = pSection->VirtualAddress;
-	// 压缩前大小Size
-	ShareData->FrontCompressSize = lSize;
-
-	// ---------------------------------开始压缩
-	// 1 获取预估的压缩后的字节数:
-	int compress_size = LZ4_compressBound(lSize);
-	// 2. 申请内存空间, 用于保存压缩后的数据
-	char* pBuff = new char[compress_size];
-	// 3. 开始压缩文件数据(函数返回压缩后的大小)
-	ShareData->LaterCompressSize = LZ4_compress(
-		pRoffset,/*压缩前的数据*/
-		pBuff, /*压缩后的数据*/
-		lSize/*文件原始大小*/);
-
-	// 4.将压缩后的数据覆盖原始数据
-	memcpy(pRoffset, pBuff, ShareData->LaterCompressSize);
-
-	// 5.修复当前区段文件大小 
-	pSection->SizeOfRawData = Alignment(ShareData->LaterCompressSize, 0x200);
-
-	// 6.将所有区段向上提升
-	PIMAGE_SECTION_HEADER pFront = pSection;
-	PIMAGE_SECTION_HEADER pLater = pSection + 1;
-	// 没有后一个区段，就不需要提升
-	while (pLater->VirtualAddress)
-	{
-		// 当前区段大小
-		long DesSize = pFront->SizeOfRawData;
-		// 移动到这个区段后面
-		char* pDest = (char*)(pFront->PointerToRawData + FileBase + DesSize);
-
-		// 下个区段大小
-		long SrcSize = pLater->SizeOfRawData;
-		// 下一个区段位置
-		char* pSrc = (char*)(pLater->PointerToRawData + FileBase);
-
-		// 拷贝区段
-		memcpy(pDest, pSrc, SrcSize);
-
-		// 修改下个区段位置 不加FileBase，应为不是在内存中
-		pLater->PointerToRawData = pFront->PointerToRawData + DesSize;
-
-		// 继续提升下个区段
-		pFront += 1;
-		pLater += 1;
-	}
-
-	// 7.重新修改文件实际大小
-	// 实际大小 = 最后一个区段位置 + 最后区段大小
-	FileSize = pFront->PointerToRawData + pFront->SizeOfRawData;
-
-	// 8.重新修改文件大小
-	FileBase = (POINTER_TYPE)realloc((VOID*)FileBase, FileSize);
-
-	// 9.释放空间
-	delete[]pBuff;
-
-	return true;
-}
-
 
 /// <summary>
 /// 获取默认代码段
@@ -402,86 +341,50 @@ void WinPack64::GetDefaultCodeSection()
 /// <param name="SectionName"></param>
 void WinPack64::XorSection(std::string SectionName)
 {
-	// 1. 获取到需要加密的区段的信息
-	auto XorSection = GetSection(FileBase, ".text");
 
-	// 2. 找到需要加密的字段所在内存中的位置
-	BYTE* data = (BYTE*)(XorSection->PointerToRawData + FileBase);
-
-	// 3. 填写解密时需要提供的信息
-	srand((unsigned int)time(0));
-	ShareData->key = rand() % 0xff;
-	ShareData->rva = XorSection->VirtualAddress;
-	ShareData->size = XorSection->SizeOfRawData;
-
-	// 4. 循环开始进行加密
-	for (int i = 0; i < ShareData->size; ++i)
-	{
-		data[i] ^= ShareData->key;
-	}
-}
-
-/// <summary>
-/// 加密所有区段
-/// </summary>
-void WinPack64::EncryptAllSection()
-{
-
-	unsigned char key1[] =
-	{
-		0xab, 0x72, 0xf5, 0xa6,
-		0x28, 0xae, 0xd2, 0x34,
-		0xaa, 0x57, 0x15, 0x82,
-		0x19, 0x2c, 0xa4, 0x3c
-	};
-
-	//初始化aes对象
-	CAES aes(key1);
-
-	//获取区段数量
-	DWORD dwSectionCount = GET_FILE_HEADER(FileBase)->NumberOfSections;
 	//获取第一个区段
 	IMAGE_SECTION_HEADER* pFirstSection = GET_SECTION_HEADER(FileBase);
-	//用于保存数据
-	ShareData->data[20][2] = { 0 };
 	ShareData->index = 0;
+	for (int iter = 0; iter < GET_FILE_HEADER(FileBase)->NumberOfSections; iter++) {
 
-	//DWORD dwIsTls = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".reloc");
-	//DWORD dwIsTls2 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".data");
-	//DWORD dwIsTls4 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".stu_re");
-	for (DWORD i = 0; i < dwSectionCount; i++)
-	{
-		DWORD dwIsRsrc = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".rsrc");
-		DWORD dwIsTls3 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".rdata");
-		DWORD dwIsTls1 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".pack");
-
-
-		//跳过资源 只读数据 壳区段
-		if (dwIsRsrc == 0 || dwIsTls1 == 0 || dwIsTls3 == 0)// || pFirstSection[i].PointerToRawData == 0 || pFirstSection[i].SizeOfRawData == 0
-		{
+		DWORD dwIsRsrc = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".rsrc");
+		DWORD dwIsTls3 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".rdata");
+		DWORD dwIsTls1 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".pack"); 
+		DWORD dwIscblt = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".cblt");
+		if (dwIsRsrc == 0 || dwIsTls1 == 0 || dwIsTls3 == 0 || dwIscblt == 0) {
 			continue;
 		}
-		else       //开始加密所有区段
+		else
 		{
-			//获取区段的首地址和大小
-			BYTE* pTargetSection = pFirstSection[i].PointerToRawData + (BYTE*)FileBase;
-			DWORD dwTargetSize = pFirstSection[i].SizeOfRawData;
+			
+			std::string sTemp(reinterpret_cast<const char*>(pFirstSection[iter].Name));
+			// 1. 获取到需要加密的区段的信息
+			auto XorSection = GetSection(FileBase, sTemp.c_str());
 
-			//修改属性为可写
-			DWORD dwOldAttr = 0;
-			VirtualProtect(pTargetSection, dwTargetSize, PAGE_EXECUTE_READWRITE, &dwOldAttr);
-			//加密目标区段
-			aes.Cipher(pTargetSection, dwTargetSize);
-			//修改回原来的属性
-			VirtualProtect(pTargetSection, dwTargetSize, dwOldAttr, &dwOldAttr);
+			if (XorSection->SizeOfRawData == 0) {
+				continue;
+			}
 
-			//保存数据到共享信息结构体
-			ShareData->data[ShareData->index][0] = pFirstSection[i].VirtualAddress;
-			ShareData->data[ShareData->index][1] = dwTargetSize;
-			ShareData->index++;
+			// 2. 找到需要加密的字段所在内存中的位置
+			BYTE* data = (BYTE*)(XorSection->PointerToRawData + FileBase);
+
+			// 3. 填写解密时需要提供的信息
+			srand((unsigned int)time(0));
+			ShareData->key[iter] = rand() % 0xff;
+			ShareData->rva[iter] = XorSection->VirtualAddress;
+			ShareData->size[iter] = XorSection->SizeOfRawData;
+
+			// 4. 循环开始进行加密
+			for (int i = 0; i < ShareData->size[iter]; ++i)
+			{
+				data[i] ^= ShareData->key[iter];
+			}
+
+			ShareData->index += 1;
 		}
+	
 	}
-	memcpy(ShareData->key1, key1, 16);
+	
 }
 
 void WinPack64::GetPackDefaultCodeSection()
@@ -519,19 +422,4 @@ bool WinPack64::IsFeFile()
 	}
 
 	return true;
-}
-
-// 操作导入表
-void WinPack64::SetClearImport()
-{
-	// 1 保存导入表
-	PIMAGE_NT_HEADERS pNt = GET_NT_HEADER(FileBase);
-	ShareData->ImportRva = pNt->OptionalHeader.DataDirectory[1].VirtualAddress;
-	// 2 清空导入表
-	pNt->OptionalHeader.DataDirectory[1].VirtualAddress = 0;
-	pNt->OptionalHeader.DataDirectory[1].Size = 0;
-	// 3 清空IAT表
-	pNt->OptionalHeader.DataDirectory[12].VirtualAddress = 0;
-	pNt->OptionalHeader.DataDirectory[12].Size = 0;
-	return;
 }
