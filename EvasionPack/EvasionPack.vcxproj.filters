@@ -13,6 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Common">
+      <UniqueIdentifier>{99754555-cccf-4b3e-8f66-21ca920461dc}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="EvasionPack.cpp">
@@ -35,29 +38,29 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Tooltip.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="Common.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
     <ClInclude Include="WinPack.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="EvasionPack.h">
       <Filter>头文件</Filter>
     </ClInclude>
-    <ClInclude Include="AES.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="lz4.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="PeOperation.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
     <ClInclude Include="Winpack64.h">
       <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Common.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="PeOperation.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="AES.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="lz4.h">
+      <Filter>Common</Filter>
+    </ClInclude>
+    <ClInclude Include="Tooltip.h">
+      <Filter>Common</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

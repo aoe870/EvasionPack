@@ -1,9 +1,14 @@
 #pragma once
-#ifndef PACK_PeOperation_H
-#define PACK_PeOperation_H
+#pragma once
 #include <Windows.h>
-#include <tchar.h>
+#include <vector>
+#include <string>
 #include "Common.h"
+#ifndef PACK_PEOPERATION_H
+#define PACK_PEOPERATION_H
+
+#define PE_OPERAND_32 1001
+#define PE_OPERAND_64 1002
 
 //PE结构的信息结构体
 typedef struct PEInformation
@@ -27,148 +32,104 @@ typedef struct PEInformation
 	PIMAGE_SECTION_HEADER pSectionHeader;	//节头
 	PIMAGE_OPTIONAL_HEADER OptionalHeader;	//可选PE头
 
+	int Operand;					//目标软件是几位 
+	std::string DefaultCode;
 }PEInfo, * pPEInfo;
 
-
-class PeOperation 
-{
+class PeOperation {
 
 public:
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:		AlignSize － 取整对齐函数
-	*※※*  Returns:		返回对齐后的数值
-	*※※*  Parameter_1:	uSize,输入的数值
-	*※※*  Parameter_2:	uSecAlignment，文件对齐或者内存对齐数值
-	*※※*  Parameter_3:
-	*※※*  Parameter_4:
-	*※※*	Parameter_5:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	ULONG_PTR AlignSize(_In_ ULONG_PTR uSize, ULONG_PTR uSecAlignment)
+	/// <summary>
+	/// 打开Pe文件
+	/// </summary>
+	/// <param name="path"></param>
+	BOOLEAN LoadPeFIle(_In_ std::string path, _Out_ pPEInfo pPEInfor);
+
+	/// <summary>
+	/// 判断是否是合法的PE文件结构
+	/// </summary>
+	/// <param name="pFileBuffer"> pe文件的基址 </param>
+	/// <returns></returns>
+	BOOLEAN IsPEFile(_Out_ UCHAR* pFileBuffer);
+
+	/// <summary>
+	/// 获取Pe结构的信息
+	/// </summary>
+	/// <param name="pPEInfor"></param>
+	VOID GetPeInfo(_In_ pPEInfo pPEInfor);
+
+	/// <summary>
+	/// 
+	/// </summary>
+	/// <param name="pPEInfor"></param>
+	/// <param name="Dllpe"></param>
+	VOID AddSection(_In_ pPEInfo pPEInfor, _In_ pPEInfo Dllpe, std::string Name = ".vmp");
+
+	/// <summary>
+	/// 修改程序入口
+	/// </summary>
+	/// <param name="pPEInfor"></param>
+	/// <param name="StartOffset"></param>
+	VOID SetPeOEP(_In_ pPEInfo pPEInfor, _In_ pPEInfo dllinfo);
+
+	/// <summary>
+	/// 修复重定位
+	/// </summary>
+	VOID PerformBaseRelocation(_Out_ pPEInfo pPEInfor, _In_ pPEInfo dllinfo);
+
+	/// <summary>
+	///  填充新区段内容
+	/// </summary>
+	/// <param name="pPEInfor"></param>
+	/// <param name="dllinfo"></param>
+	VOID CopySectionData(_Out_ pPEInfo pPEInfor, _In_ pPEInfo dllinfo);
+
+	/// <summary>
+	/// 保存文件
+	/// </summary>
+	/// <param name="pPEInfor"></param>
+	VOID SaveFile(_In_ pPEInfo pPEInfor);
+
+private:
+
+	/// <summary>
+	/// 获取pe文件的默认代码段
+	/// </summary>
+	/// <param name="FileBuffer"></param>
+	/// <returns></returns>
+	std::string GetPackDefaultCodeSection(CHAR* FileBuffer);
+
+
+	/// <summary>
+	/// 内存对齐
+	/// </summary>
+	/// <param name="n"></param>
+	/// <param name="align"></param>
+	/// <returns></returns>
+	POINTER_TYPE Alignment(POINTER_TYPE n, POINTER_TYPE align)
 	{
-		//return (uSize % uSecAlignment == 0) ? uSize : (uSize - (uSize % uSecAlignment) + uSecAlignment);
-		return ((uSize + uSecAlignment - 1) / uSecAlignment * uSecAlignment);
-	};
-
-public:
-
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:	PerformBaseRelocation - 修复重定位表
-	*※※*  Returns:	无
-	*※※*  Parameter:	char* buff,PE文件首地址(拉伸后)
-	*※※*  Parameter:	DWORD Value，PE基址与当前在内存中的地址的差值
-	*※※*  Parameter:
-	*※※*  Parameter:
-	*※※*	Parameter:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	void PerformBaseRelocation(POINTER_TYPE buff, POINTER_TYPE Value);
-
-
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:	RebuildImportTable - 修复IAT表
-	*※※*  Returns:	成功返回1，失败返回0
-	*※※*  Parameter:	char* buff，PE文件在内存中的地址(拉伸后)
-	*※※*  Parameter:
-	*※※*  Parameter:
-	*※※*  Parameter:
-	*※※*	Parameter:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	BOOL RebuildImportTable(POINTER_TYPE buff);
-
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:		GET_HEADER_DICTIONARY
-	*※※*  功能	:		获取目录表的地址
-	*※※*  Returns:		成功则返回要查询的那张目录表的内存偏移
-	*※※*  Parameter_1:	module，模块的地址
-	*※※*  Parameter_2:	idx,要查询哪张表
-	*※※*  Parameter_3:
-	*※※*  Parameter_4:
-	*※※*	Parameter_5:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	DWORD GET_HEADER_DICTIONARY(POINTER_TYPE module, int idx);
-
-
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:		GetPEInformation_
-	*※※*  功能	:		打开一个文件，拷贝进内存，获取PE文件的各种信息
-	*※※*  Returns:		成功返回1，失败返回0
-	*※※*  Parameter_1:	FilePath,文件路径
-	*※※*  Parameter_2:	pPEInfor，输出参数,把得到的PE信息存放到pPEInfor结构体里
-	*※※*  Parameter_3:
-	*※※*  Parameter_4:
-	*※※*	Parameter_5:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	bool GetPEInformation_(TCHAR* FilePath, _Out_ PEInformation* pPEInfor);
-
-
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:		GetPEInformation_1
-	*※※*  功能	:		根据内存模块，获取PE文件的各种信息
-	*※※*  Returns:		成功返回1，失败返回0
-	*※※*  Parameter_1:	pFilebuff，模块的地址
-	*※※*  Parameter_2:	pPEInfor，输出参数，把得到的PE信息存放到pPEInfor结构体里
-	*※※*  Parameter_3:	dwFileSize，模块的文件大小
-	*※※*  Parameter_4:
-	*※※*	Parameter_5:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	bool GetPEInformation_1(char* pFilebuff, _Out_ PEInformation* pPEInfor, _In_ DWORD dwFileSize = 0);
-
-
-	/*////////////////////////////////////////////////////////////////
-	*※※*  FullName:		addSeciton
-	*※※*  功能	:		添加新节
-	*※※*  Returns:		成功返回1，失败返回0
-	*※※*  Parameter_1:	pFileBuff，模块地址
-	*※※*  Parameter_2:	AddSize，要添加的大小
-	*※※*  Parameter_3:	secname[8]，新节名称，限制在八个字节内
-	*※※*  Parameter_4:
-	*※※*	Parameter_5:
-	*※※*	Author:		    LCH
-	*/////////////////////////////////////////////////////////////////;
-	bool addSeciton(POINTER_TYPE pFileBuff, DWORD AddSize, char secname[8] = { 0 });
+		return n % align == 0 ? n : (n / align + 1) * align;
+	}
 
 
 	/// <summary>
-	/// 加载PE文件
+	/// 获取区块表的信息
 	/// </summary>
-	/// <param name="FileName"></param>
-	/// <param name="Peinfo"></param>
+	/// <param name="Base"></param>
+	/// <param name="SectionName"></param>
 	/// <returns></returns>
-	BOOLEAN LoadExeFile(TCHAR* FileName, PEInformation* Peinfo);// 读取目标程序
-
-	/// <summary>
-	/// 判断是否是PE文件
-	/// </summary>
-	/// <param name=""></param>
-	/// <param name=""></param>
-	/// <returns></returns>
-	BOOLEAN IsPEFile(POINTER_TYPE pFileBuffer);
+	PIMAGE_SECTION_HEADER GetSectionBase(POINTER_TYPE Base, LPCSTR SectionName);
+	
 
 
-	/// <summary>
-	/// 获取Pe文件信息
-	/// </summary>
-	/// <param name="Peinfo"></param>
-	/// <returns></returns>
-	BOOLEAN GetPeInfo(POINTER_TYPE Pe, PEInformation* Peinfo);
+private:
+	std::string packName = ".vmp";
 
-	void SaveFile(PEInformation Peinfo);
-
-
-	void AddSection(POINTER_TYPE Base, POINTER_TYPE DllBase, PEInformation* Peinfo);
-
-
-	PIMAGE_SECTION_HEADER GetSection(POINTER_TYPE Base, LPCSTR SectionName);
-
-
-	VOID FixReloc(POINTER_TYPE Base, POINTER_TYPE DllBase);
-
-	VOID CopySectionData(POINTER_TYPE Base, POINTER_TYPE DllBase);
+	std::string FileName = "../output/demo_pack.exe";
 };
 
-#endif
+#endif // !PACK_PEOPERATION_H
+
+
+
+
