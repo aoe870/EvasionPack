@@ -62,7 +62,7 @@ int main(int argc, char** argv)
 {
     std::cout << LOGO << std::endl;
  
- //   WinPack pack = std::move(WinPack());
+    WinPack pack = std::move(WinPack());
 
     WinPack pack = std::move(WinPack("../output/demo.exe"));
     return 0;
