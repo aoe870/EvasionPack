@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 #include "Common.h"
+
+
 #ifndef PACK_PEOPERATION_H
 #define PACK_PEOPERATION_H
 
@@ -84,11 +86,12 @@ public:
 	/// <param name="dllinfo"></param>
 	VOID CopySectionData(_Out_ pPEInfo pPEInfor, _In_ pPEInfo dllinfo);
 
+
 	/// <summary>
-	/// 保存文件
+	/// 
 	/// </summary>
 	/// <param name="pPEInfor"></param>
-	VOID SaveFile(_In_ pPEInfo pPEInfor);
+	VOID XorAllSection(_In_ pPEInfo pPEInfor, _Out_ PSHAREDATA data);
 
 private:
 
@@ -111,7 +114,6 @@ private:
 		return n % align == 0 ? n : (n / align + 1) * align;
 	}
 
-
 	/// <summary>
 	/// 获取区块表的信息
 	/// </summary>
@@ -121,11 +123,9 @@ private:
 	PIMAGE_SECTION_HEADER GetSectionBase(POINTER_TYPE Base, LPCSTR SectionName);
 	
 
-
-private:
+public:
 	std::string packName = ".vmp";
 
-	std::string FileName = "../output/demo_pack.exe";
 };
 
 #endif // !PACK_PEOPERATION_H

@@ -27,8 +27,9 @@ BOOLEAN PeOperation::LoadPeFIle(_In_ std::string path, _Out_ pPEInfo pPEInfor)
 		CloseHandle(hFileHandle);
 		return FALSE;
 	}
-
+	//POINTER_TYPE pFileBuf = (POINTER_TYPE)malloc(pFileSize + 100);
 	POINTER_TYPE pFileBuf = (POINTER_TYPE)calloc(pFileSize, sizeof(BYTE));
+	//POINTER_TYPE pFileBuf = (POINTER_TYPE)m_alloc.auto_malloc<CHAR*>(pFileSize);
 
 	DWORD Read = 0;
 	ReadFile(hFileHandle, (LPVOID)pFileBuf, pFileSize, &Read, NULL);
@@ -100,8 +101,6 @@ VOID PeOperation::GetPeInfo(pPEInfo pPEInfor)
 	auto pFilebuff = pPEInfor->FileBuffer;
 
 	//2.2 把PE信息存入PEInformation结构体里
-	pPEInfor->FileBuffer = (POINTER_TYPE)pFilebuff;
-	pPEInfor->FileSize = GET_OPTIONAL_HEADER(pFilebuff)->SizeOfImage;
 	pPEInfor->AddressOfEntryPoint = GET_OPTIONAL_HEADER(pFilebuff)->AddressOfEntryPoint;
 	pPEInfor->BaseOfCode = GET_OPTIONAL_HEADER(pFilebuff)->BaseOfCode;
 	pPEInfor->pNtHeader = GET_NT_HEADER(pFilebuff);
@@ -231,87 +230,86 @@ PIMAGE_SECTION_HEADER PeOperation::GetSectionBase(POINTER_TYPE Base, LPCSTR Sect
 	
 }
 
+
 VOID PeOperation::PerformBaseRelocation(_In_ pPEInfo pPEInfor, _In_ pPEInfo dllinfo)
 {
+	// 重定位项结构体
+	struct TypeOffset
+	{
+		WORD Offset : 12;
+		WORD Type : 4;
+	};
 
-	auto dllBase = dllinfo->FileBuffer;
-	auto fileBase = pPEInfor->FileBuffer;
-
+	auto DllBase = dllinfo->FileBuffer;
+	auto FileBase = pPEInfor->FileBuffer;
 	DWORD Size = 0, OldProtect = 0;
+
 	// 获取到程序的重定位表
-	PIMAGE_DATA_DIRECTORY pDataDirectory = GET_OPTIONAL_HEADER(dllBase)->DataDirectory;
-	auto RealocTable = (PIMAGE_BASE_RELOCATION)((POINTER_TYPE)dllBase + pDataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
-	
-	
+	PIMAGE_DATA_DIRECTORY pDataDirectory = GET_OPTIONAL_HEADER(DllBase)->DataDirectory;
+	auto RealocTable = (PIMAGE_BASE_RELOCATION)((POINTER_TYPE)DllBase + pDataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+
+
 	// 如果 SizeOfBlock 不为空，就说明存在重定位块
 	while (RealocTable->SizeOfBlock)
 	{
+	
 		// 如果重定位的数据在代码段，就需要修改访问属性
-		VirtualProtect((LPVOID)(RealocTable->VirtualAddress + dllBase),
+		VirtualProtect((LPVOID)(RealocTable->VirtualAddress + DllBase),
 			0x1000, PAGE_READWRITE, &OldProtect);
-			
+		
 		// 获取重定位项数组的首地址和重定位项的数量
 		int count = (RealocTable->SizeOfBlock - 8) / 2;
+		TypeOffset* to = (TypeOffset*)(RealocTable + 1);
 		
-		WORD* relInfo = (PWORD)((POINTER_TYPE)RealocTable + sizeof(IMAGE_BASE_RELOCATION));
-
 		// 遍历每一个重定位项，输出内容
 		for (int i = 0; i < count; i++)
 		{
-			POINTER_TYPE* addr; 
-			POINTER_TYPE type, offset, item;
-
-			//the upper 4 bits define the type of relocation
-			type = *relInfo >> 12;
-			//the lower 12 bits define the offset
-			offset = (*relInfo) & 0xFFF;
-
-			switch (type)
+			// 如果 type 的值为 3 我们才需要关注
+			if (to[i].Type == 3)
 			{
-			case IMAGE_REL_BASED_ABSOLUTE:
-				
-				break;			
-			case IMAGE_REL_BASED_HIGHLOW://change comlete 32 bit address					
-												// 获取到需要重定位的地址所在的位置
-				addr = (POINTER_TYPE*)(dllBase + RealocTable->VirtualAddress + offset);
+							
+				// 获取到需要重定位的地址所在的位置
+				POINTER_TYPE* addr = (POINTER_TYPE*)(DllBase + RealocTable->VirtualAddress + to[i].Offset);
 
 				// 计算出不变的段内偏移 = *addr - imagebase - .text va
-				item = *addr - dllBase - GetSectionBase(dllBase, pPEInfor->DefaultCode.c_str())->VirtualAddress;
+				POINTER_TYPE item = *addr - DllBase - GetSectionBase(DllBase, dllinfo->DefaultCode.c_str())->VirtualAddress;
+
+
 				// 使用这个地址，计算出新的重定位后的数据
-				*addr = item + GET_OPTIONAL_HEADER(fileBase)->ImageBase + GetSectionBase(fileBase, packName.c_str())->VirtualAddress;
-				break;
-			default:
-				break;
+				*addr = item + GET_OPTIONAL_HEADER(FileBase)->ImageBase + GetSectionBase(FileBase, packName.c_str())->VirtualAddress;
+				
+				
 			}
 		}
-			
+		
 		// 还原原区段的的保护属性
-		VirtualProtect((LPVOID)(RealocTable->VirtualAddress + dllBase),
+		VirtualProtect((LPVOID)(RealocTable->VirtualAddress + DllBase),
 			0x1000, OldProtect, &OldProtect);
-	
+
+
 		//-----------------------修正VirtualAddress字段--------------------------------------------
-	
+
 		// 重定位中VirtualAddress 字段进行修改，需要把重定位表变成可写
 		VirtualProtect((LPVOID)(&RealocTable->VirtualAddress),
 			0x4, PAGE_READWRITE, &OldProtect);
-	
+
 		// 修正VirtualAddress，从壳中的text到 目标程序pack段
 		// 修复公式 ：VirtualAddress - 壳.text.VirtualAddress  + 目标程序.pack.VirtualAddress
-		RealocTable->VirtualAddress -= GetSectionBase(dllBase, dllinfo->DefaultCode.c_str())->VirtualAddress;
-		RealocTable->VirtualAddress += GetSectionBase(fileBase, packName.c_str())->VirtualAddress;
-	
+		RealocTable->VirtualAddress -= GetSectionBase(DllBase, dllinfo->DefaultCode.c_str())->VirtualAddress;
+		RealocTable->VirtualAddress += GetSectionBase(FileBase, packName.c_str())->VirtualAddress;
+
 		// 还原原区段的的保护属性
 		VirtualProtect((LPVOID)(&RealocTable->VirtualAddress),
 			0x1000, OldProtect, &OldProtect);
-	
+
 		// 找到下一个重定位块
 		RealocTable = (PIMAGE_BASE_RELOCATION)
 			((POINTER_TYPE)RealocTable + RealocTable->SizeOfBlock);
-	
+
 	}
-	
+
 	// 关闭程序的重定位，目前只是修复了壳代码的重定位，并不表示源程序支持重定位
-	GET_OPTIONAL_HEADER(fileBase)->DllCharacteristics = 0;
+	GET_OPTIONAL_HEADER(FileBase)->DllCharacteristics = 0;
 }
 
 VOID PeOperation::CopySectionData(pPEInfo pPEInfor, pPEInfo dllinfo)
@@ -326,16 +324,51 @@ VOID PeOperation::CopySectionData(pPEInfo pPEInfor, pPEInfo dllinfo)
 	memcpy(DestData, SrcData, GetSectionBase(dllinfo->FileBuffer, dllinfo->DefaultCode.c_str())->SizeOfRawData);
 }
 
-VOID PeOperation::SaveFile(pPEInfo pPEInfor)
+VOID PeOperation::XorAllSection(pPEInfo pPEInfor, PSHAREDATA Sharedata)
 {
-	// 无论文件是否存在，都要创建新的文件
-	HANDLE FileHandle = CreateFileA(FileName.c_str(), GENERIC_WRITE, NULL,
-		NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-
-	// 将目标文件的内容读取到创建的缓冲区中
-	DWORD Write = 0;
-	auto tmp = WriteFile(FileHandle, (LPVOID)pPEInfor->FileBuffer, pPEInfor->FileSize, &Write, NULL);
-
-	// 为了防止句柄泄露应该关闭句柄
-	CloseHandle(FileHandle);
+	//获取第一个区段
+	IMAGE_SECTION_HEADER* pFirstSection = GET_SECTION_HEADER(pPEInfor->FileBuffer);
+	Sharedata->index = 0;
+	for (int iter = 0; iter < GET_FILE_HEADER(pPEInfor->FileBuffer)->NumberOfSections; iter++) {
+	
+		DWORD dwIsRsrc = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".rsrc");
+		DWORD dwIsTls3 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".rdata");
+		DWORD dwIsTls1 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".pack"); 
+		DWORD dwIscblt = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".cblt");
+		if (dwIsRsrc == 0 || dwIsTls1 == 0 || dwIsTls3 == 0 || dwIscblt == 0) {
+			continue;
+		}
+		else
+		{
+				
+			std::string sTemp(reinterpret_cast<const char*>(pFirstSection[iter].Name));
+			// 1. 获取到需要加密的区段的信息
+			auto XorSection = GetSectionBase(pPEInfor->FileBuffer, sTemp.c_str());
+	
+			if (XorSection->SizeOfRawData == 0) {
+				continue;
+			}
+	
+			// 2. 找到需要加密的字段所在内存中的位置
+			BYTE* data = (BYTE*)(XorSection->PointerToRawData + pPEInfor->FileBuffer);
+	
+			// 3. 填写解密时需要提供的信息
+			srand((unsigned int)time(0));
+			Sharedata->key[iter] = rand() % 0xff;
+			Sharedata->rva[iter] = XorSection->VirtualAddress;
+			Sharedata->size[iter] = XorSection->SizeOfRawData;
+			
+			// 4. 循环开始进行加密
+			for (int i = 0; i < Sharedata->size[iter]; ++i)
+			{
+				data[i] ^= Sharedata->key[iter];
+			}
+	
+			Sharedata->index += 1;
+		}
+		
+	}
+		
 }
+
+

@@ -48,20 +48,3 @@ struct TypeOffset
 #define SetAPI(mod,name)\
 		My_##name = (decltype(name)*)MyGetProcAddress(mod,#name)
 
-
-typedef ULONG_PTR(WINAPI* fnGetProcAddress)(_In_ HMODULE hModule, _In_ LPCSTR lpProcName);
-typedef HMODULE(WINAPI* fnLoadLibraryA)(_In_ LPCSTR lpLibFileName);
-typedef int(WINAPI* fnMessageBox)(HWND hWnd, LPCWSTR lpText, LPCWSTR lpCaption, UINT uType);
-typedef HMODULE(WINAPI* fnGetModuleHandleA)(_In_opt_ LPCSTR lpModuleName);
-typedef BOOL(WINAPI* fnVirtualProtect)(_In_ LPVOID lpAddress, _In_ SIZE_T dwSize, _In_ DWORD flNewProtect, _Out_ PDWORD lpflOldProtect);
-typedef void(WINAPI* fnExitProcess)(_In_ UINT uExitCode);
-typedef LPVOID(WINAPI* fnVirtualAlloc)(_In_opt_ LPVOID lpAddress, _In_ SIZE_T dwSize, _In_ DWORD flAllocationType, _In_ DWORD flProtect);
-
-
-fnGetProcAddress	g_pfnGetProcAddress = NULL;
-fnLoadLibraryA		g_pfnLoadLibraryA = NULL;
-fnGetModuleHandleA	g_pfnGetModuleHandleA = NULL;
-fnVirtualProtect	g_pfnVirtualProtect = NULL;
-fnVirtualAlloc		g_pfnVirtualAlloc = NULL;
-fnExitProcess		g_pfnExitProcess = NULL;
-fnMessageBox		g_pfnMessageBox = NULL;

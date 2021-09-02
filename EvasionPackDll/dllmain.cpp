@@ -216,15 +216,15 @@ void XorDecryptSection()
 
 
 
-////////////////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////////////////
 
-	//ShareData.rva[1] = ShareData.rva[1] + getcurmodule();
-	//My_VirtualProtect((LPVOID)ShareData.rva[1], ShareData.size[1], PAGE_READWRITE, &OldProtect);
-	//// 执行完了第一个汇编指令之后 ShareData.rva 就是 va 了
-	//for (int i = 0; i < ShareData.size[1]; ++i)
-	//	((BYTE*)ShareData.rva)[i] ^= ShareData.key[1];
+		//ShareData.rva[1] = ShareData.rva[1] + getcurmodule();
+		//My_VirtualProtect((LPVOID)ShareData.rva[1], ShareData.size[1], PAGE_READWRITE, &OldProtect);
+		//// 执行完了第一个汇编指令之后 ShareData.rva 就是 va 了
+		//for (int i = 0; i < ShareData.size[1]; ++i)
+		//	((BYTE*)ShareData.rva)[i] ^= ShareData.key[1];
 
-	//My_VirtualProtect((LPVOID)ShareData.rva[1], ShareData.size[1], OldProtect, &OldProtect);
+		//My_VirtualProtect((LPVOID)ShareData.rva[1], ShareData.size[1], OldProtect, &OldProtect);
 }
 
 // 跳转到原始的 oep
@@ -294,7 +294,7 @@ void GetAPIAddr()
 {
 	// 所有函数都在这里获取
 	auto Ker32Base = (POINTER_TYPE)getKer32Base();
-	
+
 	My_VirtualProtect = (decltype(VirtualProtect)*)MyGetProcAddress(Ker32Base, "VirtualProtect");
 	My_GetProcAddress = (decltype(GetProcAddress)*)MyGetProcAddress(Ker32Base, "GetProcAddress");
 	My_LoadLibraryA = (decltype(LoadLibraryA)*)MyGetProcAddress(Ker32Base, "LoadLibraryA");
@@ -340,7 +340,7 @@ void AESDecryptAllSection()
 {
 	//获取当前程序的基址
 	DWORD dwBase = getcurmodule();
-	
+
 	CAES aes(ShareData.key1);
 	//循环解密所有区段
 	DWORD old = 0;
@@ -349,16 +349,16 @@ void AESDecryptAllSection()
 		//拿到所有区段的首地址和大小
 		unsigned char* pSection = (unsigned char*)ShareData.data[i][0] + dwBase;
 		DWORD dwSectionSize = ShareData.data[i][1];
-	
+
 		//修改区段属性
 		My_VirtualProtect(pSection, dwSectionSize, PAGE_EXECUTE_READWRITE, &old);
-	
+
 		//解密代码段
 		aes.InvCipher(pSection, dwSectionSize);
 		for (int i = 0; i < dwSectionSize; ++i) {
 			//pSection[i] ^= ShareData.key[1];
 		}
-			
+
 		//把属性修改回去
 		My_VirtualProtect(pSection, dwSectionSize, old, &old);
 	}
@@ -472,7 +472,6 @@ bool AdversarialSandBox() {
 	My_DeleteFileW(name);
 	return false;
 }
-
 
 // 壳代码起始函数
 extern "C" __declspec(dllexport) void start()
