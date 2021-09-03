@@ -31,26 +31,50 @@ WinPack::WinPack(std::string path)
 	pe.GetPeInfo(&dllinfo);
 
 	// 获取到共享信息
-	auto ShareData = (PSHAREDATA)GetProcAddress((HMODULE)dllinfo.FileBuffer, "ShareData");
+	auto shareAdd = (PSHAREDATA)GetProcAddress((HMODULE)dllinfo.FileBuffer, "ShareData");
 
+	if (shareAdd == NULL) {
+		return;
+	}
+	PSHAREDATA ShareData;
+	ShareData = shareAdd;
+
+	//保存PE信息 信息用于壳还原数据时用到
 	SavaPeInfo(&peinfo, ShareData);
+
+
+	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0;
+	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = 0;
+
+	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress = 0;
+	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].Size = 0;
 	
+	//添加新的区块
 	pe.AddSection(&peinfo, &dllinfo);
 
+	//重设入口
 	pe.SetPeOEP(&peinfo, &dllinfo);
 
+	//修复重定位
 	pe.PerformBaseRelocation(&peinfo, &dllinfo);
 
+	//疑惑加密
 	pe.XorAllSection(&peinfo, ShareData);
 
+	//复制区段
 	pe.CopySectionData(&peinfo, &dllinfo);
 
+	//保存文件
 	SaveFile(&peinfo);
 }
 
-VOID WinPack::SavaPeInfo(pPEInfo peinfo, PSHAREDATA dll)
+VOID WinPack::SavaPeInfo(pPEInfo peinfo, PSHAREDATA data)
 {
-	dll->OldOep = peinfo->AddressOfEntryPoint;
+	data->oldOep = peinfo->AddressOfEntryPoint;
+	data->oldRelocRva = peinfo->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
+	data->oldImageBase = peinfo->ImageBase;
+	data->oldImportRva = peinfo->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+
 }
 
 VOID WinPack::SaveFile(pPEInfo pPEInfor, std::string name)
@@ -77,5 +101,5 @@ VOID WinPack::SaveFile(pPEInfo pPEInfor, std::string name)
 		0, NULL);
 	// 为了防止句柄泄露应该关闭句柄
 	CloseHandle(FileHandle);
-}
 
+}

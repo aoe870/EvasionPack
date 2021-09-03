@@ -145,39 +145,39 @@ VOID PeOperation::AddSection(_In_ pPEInfo pPEInfor, _In_ pPEInfo Dllpe, std::str
 
 	packName = Name;
 
-	// 1. 获取到区段表的最后一个元素的地址
+	// 获取到区段表的最后一个元素的地址
 	auto LastSection = &GET_SECTION_HEADER(pPEInfor->FileBuffer)
 		[GET_FILE_HEADER(pPEInfor->FileBuffer)->NumberOfSections - 1];
 
-	// 2. 将文件头中保存的区段数量 + 1
+	// 将文件头中保存的区段数量 + 1
 	GET_FILE_HEADER(pPEInfor->FileBuffer)->NumberOfSections += 1;
 
-	// 3. 通过最后一个区段，找到新添加的区段的位置
+	// 通过最后一个区段，找到新添加的区段的位置
 	auto NewSection = LastSection + 1;
 	memset(NewSection, 0, sizeof(IMAGE_SECTION_HEADER));
 
-	// 4.  从 dll 中找到我们需要拷贝的区段
+	// 从 dll 中找到我们需要拷贝的区段
 	auto SrcSection = GetSectionBase(Dllpe->FileBuffer, Dllpe->DefaultCode.c_str());
 
-	// 5. 直接将源区段的完整信息拷贝到新的区段中
+	// 直接将源区段的完整信息拷贝到新的区段中
 	memcpy(NewSection, SrcSection, sizeof(IMAGE_SECTION_HEADER));
 
-	// 6. 设置新的区段表中的数据： 名称
+	// 设置新的区段表中的数据： 名称
 	memcpy(NewSection->Name, Name.c_str(), 7);
 
-	// 7. 设置新的区段所在的 RVA = 上一个区段的RVA + 对齐的内存大小
+	// 设置新的区段所在的 RVA = 上一个区段的RVA + 对齐的内存大小
 	NewSection->VirtualAddress = LastSection->VirtualAddress +
 		Alignment(LastSection->Misc.VirtualSize, GET_OPTIONAL_HEADER(pPEInfor->FileBuffer)->SectionAlignment);
 
-	// 8. 设置新的区段所在的 FOA = 上一个区段的FOA + 对齐的文件大小
+	// 设置新的区段所在的 FOA = 上一个区段的FOA + 对齐的文件大小
 	NewSection->PointerToRawData = LastSection->PointerToRawData +
 		Alignment(LastSection->SizeOfRawData, GET_OPTIONAL_HEADER(pPEInfor->FileBuffer)->FileAlignment);
 
-		// 9. 重新计算文件的大小，申请新的空间保存原有的数据
+		// 重新计算文件的大小，申请新的空间保存原有的数据
 	auto FileSize = NewSection->SizeOfRawData + NewSection->PointerToRawData;
 	auto FileBase = (POINTER_TYPE)realloc((VOID*)pPEInfor->FileBuffer, FileSize);
 
-	// 11. 修改 SizeOfImage 的大小 = 最后一个区段的RVA + 最后一个区段的内存大小
+	// 修改 SizeOfImage 的大小 = 最后一个区段的RVA + 最后一个区段的内存大小
 	GET_OPTIONAL_HEADER(FileBase)->SizeOfImage = NewSection->VirtualAddress + NewSection->Misc.VirtualSize;
 
 	pPEInfor->FileBuffer = FileBase;
@@ -212,13 +212,13 @@ std::string PeOperation::GetPackDefaultCodeSection(CHAR * FileBuffer)
 
 PIMAGE_SECTION_HEADER PeOperation::GetSectionBase(POINTER_TYPE Base, LPCSTR SectionName)
 {
-	// 1. 获取到区段表的第一项
+	// 获取到区段表的第一项
 	auto SectionTable = GET_SECTION_HEADER(Base);
 
-	// 2. 获取到区段表的元素个数
+	// 获取到区段表的元素个数
 	WORD SectionCount = GET_FILE_HEADER(Base)->NumberOfSections;
 
-	// 3. 遍历区段表，比较区段的名称，返回区段信息结构体的地址
+	// 遍历区段表，比较区段的名称，返回区段信息结构体的地址
 	for (WORD i = 0; i < SectionCount; ++i)
 	{
 		// 如果找到就直接返回
@@ -231,7 +231,7 @@ PIMAGE_SECTION_HEADER PeOperation::GetSectionBase(POINTER_TYPE Base, LPCSTR Sect
 }
 
 
-VOID PeOperation::PerformBaseRelocation(_In_ pPEInfo pPEInfor, _In_ pPEInfo dllinfo)
+VOID PeOperation::PerformBaseRelocation( pPEInfo pPEInfor, pPEInfo dllinfo)
 {
 	// 重定位项结构体
 	struct TypeOffset
@@ -309,7 +309,14 @@ VOID PeOperation::PerformBaseRelocation(_In_ pPEInfo pPEInfor, _In_ pPEInfo dlli
 	}
 
 	// 关闭程序的重定位，目前只是修复了壳代码的重定位，并不表示源程序支持重定位
-	GET_OPTIONAL_HEADER(FileBase)->DllCharacteristics = 0;
+	GET_OPTIONAL_HEADER(FileBase)->DllCharacteristics |= IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE;
+	GET_FILE_HEADER(FileBase)->Characteristics &= 0xFFFFFFFE;
+
+	//修改重定位表到壳
+	pPEInfor->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress = dllinfo->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
+
+	pPEInfor->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size = dllinfo->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+
 }
 
 VOID PeOperation::CopySectionData(pPEInfo pPEInfor, pPEInfo dllinfo)
@@ -331,10 +338,12 @@ VOID PeOperation::XorAllSection(pPEInfo pPEInfor, PSHAREDATA Sharedata)
 	Sharedata->index = 0;
 	for (int iter = 0; iter < GET_FILE_HEADER(pPEInfor->FileBuffer)->NumberOfSections; iter++) {
 	
+		//跳过资源 只读数据 壳区段
 		DWORD dwIsRsrc = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".rsrc");
 		DWORD dwIsTls3 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".rdata");
-		DWORD dwIsTls1 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".pack"); 
+		DWORD dwIsTls1 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)packName.c_str());
 		DWORD dwIscblt = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".cblt");
+
 		if (dwIsRsrc == 0 || dwIsTls1 == 0 || dwIsTls3 == 0 || dwIscblt == 0) {
 			continue;
 		}

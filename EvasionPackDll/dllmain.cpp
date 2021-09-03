@@ -231,7 +231,7 @@ void XorDecryptSection()
 void JmpOEP()
 {
 	void (*jump) ();
-	jump = (void(*)(void))(ShareData.OldOep + getcurmodule());
+	jump = (void(*)(void))(ShareData.oldOep + getcurmodule());
 	jump();
 }
 
@@ -398,6 +398,60 @@ bool  detectionSandbox() {
 
 }
 
+POINTER_TYPE function_Meaage(LPVOID add) {
+
+	My_MessageBoxA(NULL, "ttttt", "ttttt", MB_OK);
+
+	void (*jump) ();
+	jump = (void(*)(void))(add);
+	jump();
+
+	return (POINTER_TYPE)add;
+}
+
+void EncodeIAT() {
+
+	POINTER_TYPE Module = getcurmodule();
+	PIMAGE_IMPORT_DESCRIPTOR pImport = (PIMAGE_IMPORT_DESCRIPTOR)(Module + ShareData.oldImportRva);
+	while (pImport->Name)
+	{
+		// 5 加载相关dll
+		char* dllName = (char*)(pImport->Name + Module);
+		HMODULE Mod = My_LoadLibraryA(dllName);
+		// 6 获取INT/IAT地址
+		POINTER_TYPE* pInt = (POINTER_TYPE*)(pImport->OriginalFirstThunk + Module);
+		POINTER_TYPE* pIat = (POINTER_TYPE*)(pImport->FirstThunk + Module);
+		// 7 循环遍历INT(以0结尾
+		while (*pInt)// 其指向THUNK结构体,内部是联合体,不管哪个字段有效,都表示一个地址罢了
+		{
+			// 8 获取API地址
+			IMAGE_IMPORT_BY_NAME* FunName = (IMAGE_IMPORT_BY_NAME*)(*pInt + Module);
+			LPVOID Fun = My_GetProcAddress(Mod, FunName->Name);
+			// 10 向IAT填充假地址(可中转到真地址
+			DWORD old;
+			My_VirtualProtect(pIat, 4, PAGE_EXECUTE_READWRITE, &old);// 可写属性
+			
+			
+			if (!strcmp(FunName->Name, "MessageBoxW")) {
+				Fun = function_Meaage;
+			}
+
+			*pIat = (POINTER_TYPE)Fun;// 不必管联合体字段,直接赋值到*p即可
+			My_VirtualProtect(pIat, 4, old, &old);// 恢复原属性
+			// 11 下个INT/IAT
+			pInt++;
+			pIat++;
+		}
+
+		// 12 下一个导入表
+		pImport++;
+	}
+}
+
+/// <summary>
+/// 反模拟执行
+/// </summary>
+/// <returns></returns>
 bool AdversarialSandBox() {
 
 	wchar_t name[] = L"abdac";
@@ -479,6 +533,7 @@ extern "C" __declspec(dllexport) void start()
 	GetAPIAddr();
 	if (AdversarialSandBox()) {
 		XorDecryptSection();
+		EncodeIAT();
 		JmpOEP();
 	}
 }

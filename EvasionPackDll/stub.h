@@ -10,16 +10,14 @@
 // 共享数据结构体
 typedef struct _SHAREDATA
 {
-	POINTER_TYPE OldOep = 0;// 原始 oep
 	POINTER_TYPE rva[10] = {};// 加密的rva
 	long size[10] = {};// 加密的大小
 	BYTE key[10] = {};// 加密的 key
-	long oldRelocRva = 0;// 原始重定位表位置
-	long oldImageBase = 0;// 原始加载基址
 
-	POINTER_TYPE FrontCompressRva;//0
-	DWORD FrontCompressSize;//1
-	DWORD LaterCompressSize;//2
+	POINTER_TYPE oldRelocRva = 0;// 原始重定位表位置
+	POINTER_TYPE oldImageBase = 0;// 原始加载基址
+	POINTER_TYPE oldOep = 0;// 原始 oep
+	POINTER_TYPE oldImportRva = 0; 
 
 	unsigned char key1[16] = {};//AES解密密钥
 	int index = 0;			  //加密的区段数量 用的时候需要-1

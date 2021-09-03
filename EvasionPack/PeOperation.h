@@ -86,11 +86,11 @@ public:
 	/// <param name="dllinfo"></param>
 	VOID CopySectionData(_Out_ pPEInfo pPEInfor, _In_ pPEInfo dllinfo);
 
-
 	/// <summary>
-	/// 
+	/// 异或加密所有区段
 	/// </summary>
 	/// <param name="pPEInfor"></param>
+	/// <param name="data"></param>
 	VOID XorAllSection(_In_ pPEInfo pPEInfor, _Out_ PSHAREDATA data);
 
 private:
@@ -124,6 +124,8 @@ private:
 	
 
 public:
+
+	
 	std::string packName = ".vmp";
 
 };

@@ -33,18 +33,12 @@
     <ClCompile Include="PeOperation.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="Winpack64.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="WinPack.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="EvasionPack.h">
-      <Filter>头文件</Filter>
-    </ClInclude>
-    <ClInclude Include="Winpack64.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="Common.h">
