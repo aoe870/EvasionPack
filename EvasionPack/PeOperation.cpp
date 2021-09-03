@@ -348,8 +348,7 @@ VOID PeOperation::XorAllSection(pPEInfo pPEInfor, PSHAREDATA Sharedata)
 			continue;
 		}
 		else
-		{
-				
+		{				
 			std::string sTemp(reinterpret_cast<const char*>(pFirstSection[iter].Name));
 			// 1. 获取到需要加密的区段的信息
 			auto XorSection = GetSectionBase(pPEInfor->FileBuffer, sTemp.c_str());
@@ -374,10 +373,8 @@ VOID PeOperation::XorAllSection(pPEInfo pPEInfor, PSHAREDATA Sharedata)
 			}
 	
 			Sharedata->index += 1;
-		}
-		
-	}
-		
+		}		
+	}		
 }
 
 

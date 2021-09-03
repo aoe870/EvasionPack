@@ -400,11 +400,9 @@ bool  detectionSandbox() {
 
 POINTER_TYPE function_Meaage(LPVOID add) {
 
-	My_MessageBoxA(NULL, "ttttt", "ttttt", MB_OK);
 
-	void (*jump) ();
-	jump = (void(*)(void))(add);
-	jump();
+
+	My_MessageBoxA(NULL, "ttttt", "ttttt", MB_OK);
 
 	return (POINTER_TYPE)add;
 }
