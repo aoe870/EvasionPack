@@ -429,11 +429,6 @@ void EncodeIAT() {
 			DWORD old;
 			My_VirtualProtect(pIat, 4, PAGE_EXECUTE_READWRITE, &old);// 可写属性
 			
-			
-			if (!strcmp(FunName->Name, "MessageBoxW")) {
-				Fun = function_Meaage;
-			}
-
 			*pIat = (POINTER_TYPE)Fun;// 不必管联合体字段,直接赋值到*p即可
 			My_VirtualProtect(pIat, 4, old, &old);// 恢复原属性
 			// 11 下个INT/IAT
@@ -531,7 +526,7 @@ extern "C" __declspec(dllexport) void start()
 	GetAPIAddr();
 	if (AdversarialSandBox()) {
 		XorDecryptSection();
-		EncodeIAT();
+		//EncodeIAT();
 		JmpOEP();
 	}
 }

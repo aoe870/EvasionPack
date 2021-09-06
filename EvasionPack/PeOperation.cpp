@@ -309,13 +309,7 @@ VOID PeOperation::PerformBaseRelocation( pPEInfo pPEInfor, pPEInfo dllinfo)
 	}
 
 	// 关闭程序的重定位，目前只是修复了壳代码的重定位，并不表示源程序支持重定位
-	GET_OPTIONAL_HEADER(FileBase)->DllCharacteristics |= IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE;
-	GET_FILE_HEADER(FileBase)->Characteristics &= 0xFFFFFFFE;
-
-	//修改重定位表到壳
-	pPEInfor->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress = dllinfo->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress;
-
-	pPEInfor->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size = dllinfo->DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size;
+	GET_OPTIONAL_HEADER(FileBase)->DllCharacteristics = 0;
 
 }
 
@@ -339,40 +333,41 @@ VOID PeOperation::XorAllSection(pPEInfo pPEInfor, PSHAREDATA Sharedata)
 	for (int iter = 0; iter < GET_FILE_HEADER(pPEInfor->FileBuffer)->NumberOfSections; iter++) {
 	
 		//跳过资源 只读数据 壳区段
-		DWORD dwIsRsrc = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".rsrc");
-		DWORD dwIsTls3 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".rdata");
-		DWORD dwIsTls1 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)packName.c_str());
-		DWORD dwIscblt = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".cblt");
+		DWORD dwIsRsrc = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".text");
+		DWORD dwIsTls3 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".data");
+		//DWORD dwIsTls1 = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)packName.c_str());
+		//DWORD dwIscblt = lstrcmp((LPCWSTR)pFirstSection[iter].Name, (LPCWSTR)".cblt");
 
-		if (dwIsRsrc == 0 || dwIsTls1 == 0 || dwIsTls3 == 0 || dwIscblt == 0) {
-			continue;
-		}
-		else
-		{				
+		if (dwIsRsrc == 0 || dwIsTls3 == 0) {
+			
 			std::string sTemp(reinterpret_cast<const char*>(pFirstSection[iter].Name));
 			// 1. 获取到需要加密的区段的信息
 			auto XorSection = GetSectionBase(pPEInfor->FileBuffer, sTemp.c_str());
-	
+
 			if (XorSection->SizeOfRawData == 0) {
 				continue;
 			}
-	
+
 			// 2. 找到需要加密的字段所在内存中的位置
 			BYTE* data = (BYTE*)(XorSection->PointerToRawData + pPEInfor->FileBuffer);
-	
+
 			// 3. 填写解密时需要提供的信息
 			srand((unsigned int)time(0));
 			Sharedata->key[iter] = rand() % 0xff;
 			Sharedata->rva[iter] = XorSection->VirtualAddress;
 			Sharedata->size[iter] = XorSection->SizeOfRawData;
-			
+
 			// 4. 循环开始进行加密
 			for (int i = 0; i < Sharedata->size[iter]; ++i)
 			{
 				data[i] ^= Sharedata->key[iter];
 			}
-	
+
 			Sharedata->index += 1;
+		}
+		else
+		{				
+			continue;
 		}		
 	}		
 }

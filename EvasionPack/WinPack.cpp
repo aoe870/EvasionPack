@@ -55,12 +55,11 @@ WinPack::WinPack(std::string path)
 	//保存PE信息 信息用于壳还原数据时用到
 	SavaPeInfo(&peinfo, ShareData);
 
+	//peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0;
+	//peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = 0;
 
-	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0;
-	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = 0;
-
-	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress = 0;
-	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].Size = 0;
+	//peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress = 0;
+	//peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].Size = 0;
 	
 	//添加新的区块
 	pe.AddSection(&peinfo, &dllinfo);

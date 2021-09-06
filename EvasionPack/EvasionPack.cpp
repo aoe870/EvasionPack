@@ -61,7 +61,7 @@ int main(int argc, char** argv)
 {
     std::cout << LOGO << std::endl;
 
-    WinPack pack = std::move(WinPack("../output/demo.exe"));
+    WinPack pack = std::move(WinPack("../output/shell32.exe"));
     return 0;
     if (sizeof(argc) < 2) {
 
