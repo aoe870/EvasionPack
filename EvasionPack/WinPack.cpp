@@ -55,11 +55,11 @@ WinPack::WinPack(std::string path)
 	//保存PE信息 信息用于壳还原数据时用到
 	SavaPeInfo(&peinfo, ShareData);
 
-	//peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0;
-	//peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = 0;
+	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = 0;
+	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = 0;
 
-	//peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress = 0;
-	//peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].Size = 0;
+	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress = 0;
+	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].Size = 0;
 	
 	//添加新的区块
 	pe.AddSection(&peinfo, &dllinfo);
@@ -72,6 +72,9 @@ WinPack::WinPack(std::string path)
 
 	//疑惑加密
 	pe.XorAllSection(&peinfo, ShareData);
+
+	//压缩
+//	pe.CompressSection(&peinfo, ShareData);
 
 	//复制区段
 	pe.CopySectionData(&peinfo, &dllinfo);
@@ -100,18 +103,7 @@ VOID WinPack::SaveFile(pPEInfo pPEInfor, std::string name)
 
 	// 将目标文件的内容读取到创建的缓冲区中
 	DWORD Write = 0;
-	auto tmp = WriteFile(FileHandle, (LPVOID)pPEInfor->FileBuffer, pPEInfor->FileSize, &Write, NULL);
-	auto error = GetLastError();
-	TCHAR szBuf[128];
-	LPVOID lpMsgBuf;
-	auto test = FormatMessage(
-		FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
-		NULL,
-		error,
-		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-		(LPTSTR)&lpMsgBuf,
-		0, NULL);
+	auto tmp = WriteFile(FileHandle, (LPVOID)pPEInfor->FileBuffer, pPEInfor->FileSize, &Write, NULL);	
 	// 为了防止句柄泄露应该关闭句柄
 	CloseHandle(FileHandle);
-
 }

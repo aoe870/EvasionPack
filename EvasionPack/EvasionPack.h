@@ -35,6 +35,9 @@ typedef struct _SHAREDATA
 	POINTER_TYPE oldOep = 0;// 原始 oep
 	POINTER_TYPE oldImportRva = 0;;
 
+	POINTER_TYPE FrontCompressRva;//0
+	POINTER_TYPE FrontCompressSize;//1
+	POINTER_TYPE LaterCompressSize;//2
 
 	unsigned char key1[16] = {};//AES解密密钥
 	int index = 0;			  //加密的区段数量 用的时候需要-1

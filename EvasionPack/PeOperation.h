@@ -93,6 +93,12 @@ public:
 	/// <param name="data"></param>
 	VOID XorAllSection(_In_ pPEInfo pPEInfor, _Out_ PSHAREDATA data);
 
+	/// <summary>
+	/// Ñ¹ËõÇø¶Î
+	/// </summary>
+	/// <param name="pPEInfor"></param>
+	/// <param name="data"></param>
+	VOID CompressSection(_In_ pPEInfo pPEInfor, _Out_ PSHAREDATA data);
 private:
 
 	/// <summary>

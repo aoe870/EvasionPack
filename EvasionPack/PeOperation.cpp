@@ -1,4 +1,6 @@
 #include "PeOperation.h"
+#include "lz4.h"
+#include <time.h>
 
 #define GET_DOS_HEADER(base) ((PIMAGE_DOS_HEADER)(base))
 #define GET_NT_HEADER(base) ((PIMAGE_NT_HEADERS)((ULONG_PTR)GET_DOS_HEADER(base)->e_lfanew + (ULONG_PTR)(base)))
@@ -137,7 +139,7 @@ VOID PeOperation::GetPeInfo(pPEInfo pPEInfor)
 		pPEInfor->Operand = PE_OPERAND_64;
 	}
 
-	pPEInfor->DefaultCode = std::move(GetPackDefaultCodeSection((CHAR*)pPEInfor->FileBuffer));
+	pPEInfor->DefaultCode = GetPackDefaultCodeSection((CHAR*)pPEInfor->FileBuffer);
 }
 
 VOID PeOperation::AddSection(_In_ pPEInfo pPEInfor, _In_ pPEInfo Dllpe, std::string Name)
@@ -203,8 +205,8 @@ std::string PeOperation::GetPackDefaultCodeSection(CHAR * FileBuffer)
 	auto count = GET_NT_HEADER(FileBuffer)->FileHeader.NumberOfSections;
 	IMAGE_SECTION_HEADER* SecHeader = GET_SECTION_HEADER(FileBuffer);
 
-	for (auto iter = 0; iter < count; iter++) {
-		if ((SecHeader[iter].VirtualAddress + SecHeader[iter].SizeOfRawData) > OEP && OEP > SecHeader[iter].VirtualAddress) {	
+	for (auto iter = 0; iter < count - 1; iter++) {
+		if (SecHeader[iter].VirtualAddress <= OEP && OEP <= SecHeader[iter + 1].VirtualAddress) {	
 			return	std::string((char*)SecHeader[iter].Name);
 		}
 	}
@@ -370,6 +372,41 @@ VOID PeOperation::XorAllSection(pPEInfo pPEInfor, PSHAREDATA Sharedata)
 			continue;
 		}		
 	}		
+}
+
+VOID PeOperation::CompressSection(pPEInfo pPEInfor, PSHAREDATA data)
+{
+	// 获取这个区段信息
+	PIMAGE_SECTION_HEADER pSection = GetSectionBase(pPEInfor->FileBuffer, pPEInfor->DefaultCode.c_str());
+	// 压缩前位置
+	char* pRoffset = (char*)(pSection->PointerToRawData + pPEInfor->FileBuffer);
+	// 区段在文件中的大小
+	long lSize = pSection->SizeOfRawData;
+
+	// 0 保存压缩前信息
+	// 压缩数据的RVA
+	data->FrontCompressRva = pSection->VirtualAddress;
+	// 压缩前大小Size
+	data->FrontCompressSize = lSize;
+
+	// ---------------------------------开始压缩
+	// 1 获取预估的压缩后的字节数:
+	int compress_size = LZ4_compressBound(lSize);
+	// 2. 申请内存空间, 用于保存压缩后的数据
+	char* pBuff = new char[compress_size];
+	// 3. 开始压缩文件数据(函数返回压缩后的大小)
+	data->LaterCompressSize = LZ4_compress(
+		pRoffset,/*压缩前的数据*/
+		pBuff, /*压缩后的数据*/
+		lSize/*文件原始大小*/);
+
+	memset(pRoffset, 0, pSection->SizeOfRawData);
+
+	// 4.将压缩后的数据覆盖原始数据
+	memcpy(pRoffset, pBuff, data->LaterCompressSize);
+
+	// 9.释放空间
+	delete[]pBuff;
 }
 
 

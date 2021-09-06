@@ -214,17 +214,6 @@ void XorDecryptSection()
 		My_VirtualProtect((LPVOID)va, size, OldProtect, &OldProtect);
 	}
 
-
-
-	////////////////////////////////////////////////////////////////////////////////////////////
-
-		//ShareData.rva[1] = ShareData.rva[1] + getcurmodule();
-		//My_VirtualProtect((LPVOID)ShareData.rva[1], ShareData.size[1], PAGE_READWRITE, &OldProtect);
-		//// 执行完了第一个汇编指令之后 ShareData.rva 就是 va 了
-		//for (int i = 0; i < ShareData.size[1]; ++i)
-		//	((BYTE*)ShareData.rva)[i] ^= ShareData.key[1];
-
-		//My_VirtualProtect((LPVOID)ShareData.rva[1], ShareData.size[1], OldProtect, &OldProtect);
 }
 
 // 跳转到原始的 oep
@@ -311,7 +300,6 @@ void GetAPIAddr()
 
 	My_CreateFileW = (decltype(CreateFileW)*)MyGetProcAddress(Ker32Base, "CreateFileW");
 
-
 	POINTER_TYPE huser = (POINTER_TYPE)My_LoadLibraryA("user32.dll");
 	SetAPI(huser, CreateWindowExA);
 	SetAPI(huser, DefWindowProcA);
@@ -363,7 +351,6 @@ void AESDecryptAllSection()
 		My_VirtualProtect(pSection, dwSectionSize, old, &old);
 	}
 }
-
 
 
 /// <summary>
@@ -427,8 +414,7 @@ void EncodeIAT() {
 			LPVOID Fun = My_GetProcAddress(Mod, FunName->Name);
 			// 10 向IAT填充假地址(可中转到真地址
 			DWORD old;
-			My_VirtualProtect(pIat, 4, PAGE_EXECUTE_READWRITE, &old);// 可写属性
-			
+			My_VirtualProtect(pIat, 4, PAGE_EXECUTE_READWRITE, &old);// 可写属性			
 			*pIat = (POINTER_TYPE)Fun;// 不必管联合体字段,直接赋值到*p即可
 			My_VirtualProtect(pIat, 4, old, &old);// 恢复原属性
 			// 11 下个INT/IAT
@@ -520,13 +506,41 @@ bool AdversarialSandBox() {
 	return false;
 }
 
+
+void UncompressSection() {
+	// 1.待解压的位置
+	char* pSrc = (char*)(ShareData.FrontCompressRva + getcurmodule());
+
+	//2. 申请空间
+	char* pBuff = (char*)My_VirtualAlloc(0, ShareData.FrontCompressSize,
+		MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+
+	//3. 解压缩
+	LZ4_uncompress_unknownOutputSize(
+		pSrc,/*压缩后的数据*/
+		pBuff, /*解压出来的数据*/
+		ShareData.LaterCompressSize,/*压缩后的大小*/
+		ShareData.FrontCompressSize/*压缩前的大小*/);
+
+	//4.修改属性
+	DWORD OldProtect;
+	My_VirtualProtect(pSrc, ShareData.FrontCompressSize, PAGE_EXECUTE_READWRITE, &OldProtect);
+
+	//5.写入原始数据
+	memcpy(pSrc, pBuff, ShareData.FrontCompressSize);
+
+	//6.恢复属性
+	My_VirtualProtect(pSrc, ShareData.FrontCompressSize, OldProtect, &OldProtect);
+}
+
 // 壳代码起始函数
 extern "C" __declspec(dllexport) void start()
 {
 	GetAPIAddr();
 	if (AdversarialSandBox()) {
+		//UncompressSection();
 		XorDecryptSection();
-		//EncodeIAT();
+		EncodeIAT();
 		JmpOEP();
 	}
 }
