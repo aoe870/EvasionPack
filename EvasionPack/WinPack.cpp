@@ -6,18 +6,17 @@ std::vector<std::string> DllNameTable{ "EvasionPackDll.dll" };
 WinPack::WinPack(std::string path)
 {
 
-	
-	DWORD Frame = 1110; /* MUST be the very first thing in the function */
-	DWORD abc = 12;
+	//DWORD Frame = 1110; /* MUST be the very first thing in the function */
+	//DWORD abc = 12;
 
-	PDWORD pFrame;
+	//PDWORD pFrame;
 
-	Frame++; /* make sure that Frame doesn't get optimized out */
+	//Frame++; /* make sure that Frame doesn't get optimized out */
 
-	pFrame = (PDWORD)(&Frame);
-	/*... do stuff with pFrame here*/
-	
-	auto add = (PDWORD)pFrame + 8;
+	//pFrame = (PDWORD)(&Frame);
+	///*... do stuff with pFrame here*/
+	//
+	//auto add = (PDWORD)pFrame + 8;
 
 	PEInfo peinfo;
 	PeOperation pe;
