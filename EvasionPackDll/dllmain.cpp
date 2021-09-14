@@ -466,6 +466,48 @@ bool DelayRun() {
 
 }
 
+//检查程序是否被调试(发现被调试，程序直接卡死)
+BOOL Check_ZwSetInformationObject()
+{
+	HANDLE v3;
+	HANDLE TargetHandle;
+
+	typedef NTSTATUS(__stdcall* NTSETINFORMATIONOBJECT)(HANDLE objhandle, int objinforClass, PVOID objinfo, ULONG Length);
+	NTSETINFORMATIONOBJECT pZwSetInformationObject;
+
+	typedef BOOL(__stdcall* SETHANDLEINFORMATION)(_In_ HANDLE hObject, _In_ DWORD dwMask, _In_ DWORD dwFlags);
+	SETHANDLEINFORMATION pSetHandleInformation;
+
+	typedef BOOL(__stdcall* DUPLICATEHANDLE)(
+		_In_ HANDLE hSourceProcessHandle,
+		_In_ HANDLE hSourceHandle,
+		_In_ HANDLE hTargetProcessHandle,
+		_Outptr_ LPHANDLE lpTargetHandle,
+		_In_ DWORD dwDesiredAccess,
+		_In_ BOOL bInheritHandle,
+		_In_ DWORD dwOptions
+		);
+	DUPLICATEHANDLE pDuplicateHandle;
+
+	HMODULE hModule_1 = My_LoadLibraryA("kernel32.dll");
+	pSetHandleInformation = (SETHANDLEINFORMATION)My_GetProcAddress(hModule_1, "SetHandleInformation");
+	pDuplicateHandle = (DUPLICATEHANDLE)My_GetProcAddress(hModule_1, "DuplicateHandle");
+
+	HMODULE hModule = My_LoadLibraryA("ntdll.dll");
+	pZwSetInformationObject = (NTSETINFORMATIONOBJECT)My_GetProcAddress(hModule, "ZwSetInformationObject");
+
+	pDuplicateHandle((HANDLE)-1, (HANDLE)-1, (HANDLE)-1, &TargetHandle, 0, 0, 0);
+	pZwSetInformationObject(TargetHandle, 4, &TargetHandle, 2);
+	pSetHandleInformation(TargetHandle, 2, 2);
+	pDuplicateHandle((HANDLE)-1, TargetHandle, (HANDLE)-1, &v3, 0, 0, 1);
+#ifdef _WIN64
+	return !v3 || v3 == (HANDLE)0xCCCCCCCCCCCCCCCC;
+#endif // _WIN64
+
+	return !v3 || v3 == (HANDLE)0xCCCCCCCC;
+}
+
+
 //反虚拟机(寻找目标进程，成功返回true,失败返回false)
 bool GetProcessIdByName(TCHAR* szProcessName)
 {
@@ -521,20 +563,18 @@ bool GetProcessIdByName(TCHAR* szProcessName)
 }
 
 
-
 /// <summary>
 /// 反模拟执行
 /// </summary>
 /// <returns></returns>
 bool AdversarialSandBox() {
 
-	wchar_t name[] = L"abdac";
+	wchar_t name[] = L"tmpFile";
 
 	DWORD dwAttrib = My_GetFileAttributesW(name);
 
 	if (dwAttrib != INVALID_FILE_ATTRIBUTES &&
 		!(dwAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
-		My_MessageBoxA(NULL, "Can not open the file", "Playwav", MB_OK);
 		return false;
 	}
 
@@ -548,11 +588,10 @@ bool AdversarialSandBox() {
 	if (hOpenFile == INVALID_HANDLE_VALUE)
 	{
 		hOpenFile = NULL;
-		My_MessageBoxA(NULL, "Can not open the file", "Playwav", MB_OK);
 		return false;
 	}
 
-	char str[] = "t     erwrwhis is test";
+	char str[] = "t     his is test";
 	DWORD dwBytesWritten = 0;
 	auto bErrorFlag = My_WriteFile(
 		hOpenFile,           // open file handle
@@ -576,7 +615,6 @@ bool AdversarialSandBox() {
 	{
 
 		hOpenFile = NULL;
-		My_MessageBoxA(NULL, "Can not open the file", "Playwav", MB_OK);
 		return false;
 	}
 
@@ -585,7 +623,6 @@ bool AdversarialSandBox() {
 	if (FALSE == My_ReadFileEx(hOpenFile, ReadBuffer, 255 - 1, &ol, NULL))
 	{
 		hOpenFile = NULL;
-		My_MessageBoxA(NULL, "Can not open the file", "Playwav", MB_OK);
 		return false;
 	}
 
@@ -594,7 +631,6 @@ bool AdversarialSandBox() {
 		My_DeleteFileW(name);
 		return true;
 	}
-
 
 	My_CloseHandle(hOpenFile);
 	My_DeleteFileW(name);
@@ -632,7 +668,7 @@ void UncompressSection() {
 extern "C" __declspec(dllexport) void start()
 {
 	GetAPIAddr();
-	if (AdversarialSandBox()) {
+	if (AdversarialSandBox() || Check_ZwSetInformationObject()) {
 		XorDecryptSection();
 		EncodeIAT();
 		JmpOEP();

@@ -21,6 +21,13 @@
 #define POINTER_TYPE DWORD
 #endif
 
+typedef struct _ENCRYPTIONINFO
+{
+	POINTER_TYPE rva[10] = {};// 加密的rva
+	long size[10] = {};// 加密的大小
+	BYTE key[10] = {};// 加密的 key
+}ENCRYPTIONINFO, * PENCRYPTIONINFO;
+
 
 // 共享数据结构体
 typedef struct _SHAREDATA
