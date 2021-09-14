@@ -39,6 +39,27 @@ typedef struct _UNICODE_STRING {
 	PWSTR  Buffer;
 }UNICODE_STRING, * PUNICODE_STRING;
 
+
+typedef struct tagPROCESSENTRY32or64
+{
+	DWORD   dwSize;
+	DWORD   cntUsage;
+	DWORD   th32ProcessID;          // this process
+	ULONG_PTR th32DefaultHeapID;
+	DWORD   th32ModuleID;           // associated exe
+	DWORD   cntThreads;
+	DWORD   th32ParentProcessID;    // this process's parent process
+	LONG    pcPriClassBase;         // Base priority of process's threads
+	DWORD   dwFlags;
+#ifdef UNICODE
+	WCHAR   szExeFile[MAX_PATH];    // Path
+#else
+	CHAR    szExeFile[MAX_PATH];    // Path
+#endif // UNICODE
+
+} PROCESSENTRY32or64, * LPPROCESSENTRY32or64;
+#define TH32CS_SNAPPROCESS  0x00000002
+
 // 导出一个全局变量来共享数据
 extern "C" __declspec(dllexport)SHAREDATA ShareData = { 0 };
 
@@ -445,6 +466,61 @@ bool DelayRun() {
 
 }
 
+//反虚拟机(寻找目标进程，成功返回true,失败返回false)
+bool GetProcessIdByName(TCHAR* szProcessName)
+{
+
+	typedef int(__stdcall* LSTRCMP_)(
+#ifdef UNICODE
+		_In_ LPCWSTR lpString1, _In_ LPCWSTR lpString2
+#else
+		_In_ LPCSTR lpString1, _In_ LPCSTR lpString2
+#endif // UNICODE
+		);
+	LSTRCMP_ plstrcmpi;
+
+	typedef HANDLE(__stdcall* CREATETOOLHELP32SNAPSHOT)(DWORD dwFlags, DWORD th32ProcessID);
+	CREATETOOLHELP32SNAPSHOT pCreateToolhelp32Snapshot;
+	typedef BOOL(__stdcall* PROCESS32FIRST)(HANDLE hSnapshot, LPPROCESSENTRY32or64 lppe);
+	PROCESS32FIRST pProcess32First;
+	typedef BOOL(__stdcall* PROCESS32NEXT)(HANDLE hSnapshot, LPPROCESSENTRY32or64 lppe);
+	PROCESS32NEXT pProcess32Next;
+
+	HMODULE hModule_1 = My_LoadLibraryA("kernel32.dll");
+	pCreateToolhelp32Snapshot = (CREATETOOLHELP32SNAPSHOT)My_GetProcAddress(hModule_1, "CreateToolhelp32Snapshot");
+
+#ifdef UINCODE
+	plstrcmpi = (LSTRCMP_)g_pfnGetProcAddress(hModule_1, "lstrcmpiW");
+	pProcess32First = (PROCESS32FIRST)g_pfnGetProcAddress(hModule_1, "Process32FirstW");
+	pProcess32Next = (PROCESS32NEXT)g_pfnGetProcAddress(hModule_1, "Process32NextW");
+
+#else
+	plstrcmpi = (LSTRCMP_)My_GetProcAddress(hModule_1, "lstrcmpiA");
+	pProcess32First = (PROCESS32FIRST)My_GetProcAddress(hModule_1, "Process32First");
+	pProcess32Next = (PROCESS32NEXT)My_GetProcAddress(hModule_1, "Process32Next");
+#endif // UINCODE
+
+	HANDLE hSnapProcess = pCreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (hSnapProcess == NULL)
+	{
+		return FALSE;
+	}
+	PROCESSENTRY32or64 pe32 = { 0 };
+	pe32.dwSize = sizeof(pe32);
+	BOOL bRet = pProcess32First(hSnapProcess, &pe32);
+	while (bRet)
+	{
+		if (plstrcmpi(pe32.szExeFile, szProcessName) == 0)
+		{
+			//g_pfnMessageBox(NULL, L"这是虚拟机", L"Hello PEDIY", MB_OK);
+			return TRUE;
+		}
+		bRet = pProcess32Next(hSnapProcess, &pe32);
+	}
+	return FALSE;
+}
+
+
 
 /// <summary>
 /// 反模拟执行
@@ -557,10 +633,7 @@ extern "C" __declspec(dllexport) void start()
 {
 	GetAPIAddr();
 	if (AdversarialSandBox()) {
-		//64位压碎后某些样本无法执行
-		//UncompressSection();
 		XorDecryptSection();
-		//32位置某些导入表的操作无法使用导入表加密
 		EncodeIAT();
 		JmpOEP();
 	}
