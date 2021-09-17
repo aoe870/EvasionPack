@@ -1,6 +1,7 @@
 #include "PeOperation.h"
 #include "lz4.h"
 #include <time.h>
+#include "AES.h"
 
 #define GET_DOS_HEADER(base) ((PIMAGE_DOS_HEADER)(base))
 #define GET_NT_HEADER(base) ((PIMAGE_NT_HEADERS)((ULONG_PTR)GET_DOS_HEADER(base)->e_lfanew + (ULONG_PTR)(base)))
@@ -20,6 +21,7 @@ BOOLEAN PeOperation::LoadPeFIle(_In_ std::string path, _Out_ pPEInfo pPEInfor)
 
 	if (hFileHandle == INVALID_HANDLE_VALUE) {
 		CloseHandle(hFileHandle);
+		PrintLog("open file error !", LOGTRPE_ERROR);
 		return FALSE;
 	}
 
@@ -27,6 +29,7 @@ BOOLEAN PeOperation::LoadPeFIle(_In_ std::string path, _Out_ pPEInfo pPEInfor)
 	auto pFileSize = GetFileSize(hFileHandle, NULL);
 	if (pFileSize == 0xFFFFFFFF) {
 		CloseHandle(hFileHandle);
+		PrintLog("Memory allocation failed!", LOGTRPE_ERROR);
 		return FALSE;
 	}
 	//POINTER_TYPE pFileBuf = (POINTER_TYPE)malloc(pFileSize + 100);
@@ -34,7 +37,10 @@ BOOLEAN PeOperation::LoadPeFIle(_In_ std::string path, _Out_ pPEInfo pPEInfor)
 	//POINTER_TYPE pFileBuf = (POINTER_TYPE)m_alloc.auto_malloc<CHAR*>(pFileSize);
 
 	DWORD Read = 0;
-	ReadFile(hFileHandle, (LPVOID)pFileBuf, pFileSize, &Read, NULL);
+	if (!ReadFile(hFileHandle, (LPVOID)pFileBuf, pFileSize, &Read, NULL)) {
+		PrintLog("Open Pe file failed!", LOGTRPE_ERROR);
+		return FALSE;
+	};
 	 
 	// 为了防止句柄泄露应该关闭句柄
 	CloseHandle(hFileHandle);
@@ -43,7 +49,7 @@ BOOLEAN PeOperation::LoadPeFIle(_In_ std::string path, _Out_ pPEInfo pPEInfor)
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFileBuf;
 	if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
 	{
-		MessageBoxA(NULL, "不是MZ开头", "提示", MB_OK);
+		PrintLog("The file does not begin with MZ", LOGTRPE_ERROR);
 		return 0;
 	}
 	PIMAGE_NT_HEADERS pNtHeader = (PIMAGE_NT_HEADERS)(pFileBuf + pDosHeader->e_lfanew);
@@ -52,7 +58,7 @@ BOOLEAN PeOperation::LoadPeFIle(_In_ std::string path, _Out_ pPEInfo pPEInfor)
 
 	if (pNtHeader->Signature != IMAGE_NT_SIGNATURE)
 	{
-		MessageBoxA(NULL, "不是PE文件", "提示", MB_OK);
+		PrintLog("Not PE file", LOGTRPE_ERROR);
 		return 0;
 	}
 	
@@ -68,7 +74,7 @@ BOOLEAN PeOperation::IsPEFile(UCHAR* pFileBuffer)
 	PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)pFileBuffer;
 	if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
 	{
-	//	MessageBoxA(hwndDlg, "不是有效的MZ标志!", "提示", NULL);
+		PrintLog("Not a valid MZ flag", LOGTRPE_ERROR);
 		return FALSE;
 	}
 
@@ -76,23 +82,24 @@ BOOLEAN PeOperation::IsPEFile(UCHAR* pFileBuffer)
 	if (pNTHeader->Signature != IMAGE_NT_SIGNATURE)
 	{
 	//	MessageBoxA(hwndDlg, "不是有效的PE标志!", "提示", NULL);
+		PrintLog("Not a valid MZ flag", LOGTRPE_ERROR);
 		return FALSE;
 	}
 #ifdef _WIN64
 	if (pNTHeader->OptionalHeader.Magic != 0x20B)
 	{
 	//	MessageBoxA(hwndDlg, "不是有效的64位PE程序!", "提示", NULL);
+		PrintLog("Not a valid 64-bit PE App", LOGTRPE_ERROR);
 		return FALSE;
 	}
 #else
 	if (pNTHeader->OptionalHeader.Magic != 0x10B)
 	{
 		//MessageBoxA(hwndDlg, "不是有效的32位PE程序!", "提示", NULL);
+		PrintLog("Not a valid 32-bit PE App ", LOGTRPE_ERROR);
 		return FALSE;
 	}
 #endif // _WIN64
-
-
 
 	return TRUE;
 }
@@ -165,7 +172,8 @@ VOID PeOperation::AddSection(_In_ pPEInfo pPEInfor, _In_ pPEInfo Dllpe, std::str
 	memcpy(NewSection, SrcSection, sizeof(IMAGE_SECTION_HEADER));
 
 	// 设置新的区段表中的数据： 名称
-	memcpy(NewSection->Name, Name.c_str(), 7);
+	memset(NewSection->Name, 0, 7);
+	memcpy(NewSection->Name, Name.c_str(), Name.size());
 
 	// 设置新的区段所在的 RVA = 上一个区段的RVA + 对齐的内存大小
 	NewSection->VirtualAddress = LastSection->VirtualAddress +
@@ -383,18 +391,18 @@ VOID PeOperation::CompressSection(pPEInfo pPEInfor, PSHAREDATA data)
 	// 区段在文件中的大小
 	long lSize = pSection->SizeOfRawData;
 
-	// 0 保存压缩前信息
+	// 保存压缩前信息
 	// 压缩数据的RVA
 	data->FrontCompressRva = pSection->VirtualAddress;
 	// 压缩前大小Size
 	data->FrontCompressSize = lSize;
 
 	// ---------------------------------开始压缩
-	// 1 获取预估的压缩后的字节数:
+	// 获取预估的压缩后的字节数:
 	int compress_size = LZ4_compressBound(lSize);
-	// 2. 申请内存空间, 用于保存压缩后的数据
+	// 申请内存空间, 用于保存压缩后的数据
 	char* pBuff = new char[compress_size];
-	// 3. 开始压缩文件数据(函数返回压缩后的大小)
+	//  开始压缩文件数据(函数返回压缩后的大小)
 	data->LaterCompressSize = LZ4_compress(
 		pRoffset,/*压缩前的数据*/
 		pBuff, /*压缩后的数据*/
@@ -402,11 +410,76 @@ VOID PeOperation::CompressSection(pPEInfo pPEInfor, PSHAREDATA data)
 
 	memset(pRoffset, 0, pSection->SizeOfRawData);
 
-	// 4.将压缩后的数据覆盖原始数据
+	// 将压缩后的数据覆盖原始数据
 	memcpy(pRoffset, pBuff, data->LaterCompressSize);
 
-	// 9.释放空间
+	// 释放空间
 	delete[]pBuff;
 }
 
 
+ENCRYPTIONINFO PeOperation::EncryptAllSection(pPEInfo pPEInfor)
+{
+
+	ENCRYPTIONINFO sEncryption = { 0 };
+
+	unsigned char key1[] =
+	{
+		0x2b, 0x7e, 0x15, 0x16,
+		0x28, 0xae, 0xd2, 0xa6,
+		0xab, 0xf7, 0x15, 0x88,
+		0x09, 0xcf, 0x4f, 0x3c
+	};
+
+	//初始化aes对象
+	CAES aes(key1);
+
+	//获取区段数量
+	DWORD dwSectionCount = GET_FILE_HEADER(pPEInfor->FileBuffer)->NumberOfSections;
+	//获取第一个区段
+	IMAGE_SECTION_HEADER* pFirstSection = IMAGE_FIRST_SECTION(GET_NT_HEADER(pPEInfor->FileBuffer));
+
+	int idx = 0;
+	for (DWORD i = 0; i < dwSectionCount; i++)
+	{
+		DWORD dwIsRsrc = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".rsrc");
+		DWORD dwIsTls3 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".cblt");
+		DWORD dwIsTls1 = lstrcmp((LPCWSTR)pFirstSection[i].Name, (LPCWSTR)".vmp");
+		//跳过资源 只读数据 壳区段
+		if (dwIsRsrc == 0 || dwIsTls1 == 0|| dwIsTls3 == 0)
+		{
+			continue;
+		}
+		else
+		{
+			sEncryption.sEncryption[idx] = { 0 };
+
+			//获取区段的首地址和大小
+			BYTE* pTargetSection = pFirstSection[i].PointerToRawData + (BYTE*)pPEInfor->FileBuffer;
+			DWORD dwTargetSize = pFirstSection[i].SizeOfRawData;
+
+			//修改属性为可写
+			DWORD dwOldAttr = 0;
+			VirtualProtect(pTargetSection, dwTargetSize, PAGE_EXECUTE_READWRITE, &dwOldAttr);
+
+			int count = (dwTargetSize - (dwTargetSize % 16)) / 16;
+			for (int idx = 0; idx < count; idx++) {
+				char* add = (char*)pTargetSection + idx * 16;
+				aes.Cipher(add, 16);
+			}
+
+			//修改回原来的属性
+			VirtualProtect(pTargetSection, dwTargetSize, dwOldAttr, &dwOldAttr);
+
+			//保存数据到共享信息结构体
+			sEncryption.sEncryption[idx].rva = pFirstSection[i].VirtualAddress;
+			sEncryption.sEncryption[idx].size = pFirstSection[i].SizeOfRawData;
+			idx++;
+		}
+
+		sEncryption.indix = idx;
+	}
+	memcpy(sEncryption.key, key1, 16);
+
+	return sEncryption;
+}

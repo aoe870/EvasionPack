@@ -1,6 +1,9 @@
 #include "stub.h"
 #include "AES.h"
 #include "lz4.h"
+#include <iostream>
+#include <sstream>
+#include <string.h>
 
 // 合并data/rdata到text段, 将text改成可读可写可执行
 #pragma comment(linker, "/merge:.data=.text") 
@@ -348,24 +351,28 @@ void GetAPIAddr()
 void AESDecryptAllSection()
 {
 	//获取当前程序的基址
-	DWORD dwBase = getcurmodule();
+	POINTER_TYPE dwBase = getcurmodule();
+	
+	CAES aes(ShareData.sEncryption.key);
 
-	CAES aes(ShareData.key1);
 	//循环解密所有区段
 	DWORD old = 0;
-	for (int i = 0; i < ShareData.index; i++)
+	for (int i = 0; i < ShareData.sEncryption.indix; i++)
 	{
+
 		//拿到所有区段的首地址和大小
-		unsigned char* pSection = (unsigned char*)ShareData.data[i][0] + dwBase;
-		DWORD dwSectionSize = ShareData.data[i][1];
+		unsigned char* pSection = (unsigned char*)ShareData.sEncryption.sEncryption[i].rva + dwBase;
+		DWORD dwSectionSize = ShareData.sEncryption.sEncryption[i].size;
 
 		//修改区段属性
 		My_VirtualProtect(pSection, dwSectionSize, PAGE_EXECUTE_READWRITE, &old);
 
-		//解密代码段
-		aes.InvCipher(pSection, dwSectionSize);
-		for (int i = 0; i < dwSectionSize; ++i) {
-			//pSection[i] ^= ShareData.key[1];
+		//16个字节加密 
+		int count = (dwSectionSize - (dwSectionSize % 16)) / 16;
+		for (int idx = 0; idx < count; idx++) {
+			//My_MessageBoxA(NULL, "bbbb", "", MB_OK);
+			char* add = (char*)pSection + idx * 16;
+			aes.InvCipher(add, 16);
 		}
 
 		//把属性修改回去
@@ -569,7 +576,7 @@ bool GetProcessIdByName(TCHAR* szProcessName)
 /// <returns></returns>
 bool AdversarialSandBox() {
 
-	wchar_t name[] = L"tmpFile";
+	wchar_t name[] = L"tmpFile2";
 
 	DWORD dwAttrib = My_GetFileAttributesW(name);
 
@@ -668,8 +675,9 @@ void UncompressSection() {
 extern "C" __declspec(dllexport) void start()
 {
 	GetAPIAddr();
-	if (AdversarialSandBox() || Check_ZwSetInformationObject()) {
-		XorDecryptSection();
+	if (AdversarialSandBox()) {
+		AESDecryptAllSection();
+		//XorDecryptSection();
 		EncodeIAT();
 		JmpOEP();
 	}

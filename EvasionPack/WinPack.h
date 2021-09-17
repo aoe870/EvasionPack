@@ -6,7 +6,8 @@
 class WinPack
 {
 public:
-	WinPack(std::string path);
+
+	WinPack(std::string path, std::string newFileName);
 
 	/// <summary>
 	/// ±£¥Ê–≈œ¢
@@ -31,7 +32,7 @@ public:
 public:
 
 	//
-	std::string FileName = "../output/demo_pack.exe";
+	std::string FileName = "demo_pack.exe";
 };
 
 #endif // !Pack_winpack_h

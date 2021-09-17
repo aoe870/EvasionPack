@@ -99,6 +99,9 @@ public:
 	/// <param name="pPEInfor"></param>
 	/// <param name="data"></param>
 	VOID CompressSection(_In_ pPEInfo pPEInfor, _Out_ PSHAREDATA data);
+
+
+	ENCRYPTIONINFO EncryptAllSection(pPEInfo pPEInfor);
 private:
 
 	/// <summary>

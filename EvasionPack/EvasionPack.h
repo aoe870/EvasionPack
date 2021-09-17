@@ -21,11 +21,17 @@
 #define POINTER_TYPE DWORD
 #endif
 
+typedef struct _SectionEncryptionInfo {
+	POINTER_TYPE rva; // 加密的rva
+	long size; // 加密的大小
+}SectionEncryptionInfo, * PSectionEncryptionInfo;
+
+
 typedef struct _ENCRYPTIONINFO
 {
-	POINTER_TYPE rva[10] = {};// 加密的rva
-	long size[10] = {};// 加密的大小
-	BYTE key[10] = {};// 加密的 key
+	SectionEncryptionInfo sEncryption[20];  //加密区块信息
+	BYTE key[100] = {};// 加密的 key
+	int indix = 0;
 }ENCRYPTIONINFO, * PENCRYPTIONINFO;
 
 
@@ -50,5 +56,6 @@ typedef struct _SHAREDATA
 	int index = 0;			  //加密的区段数量 用的时候需要-1
 	int data[20][2];  //加密的区段RVA和Size	
 
-} SHAREDATA, * PSHAREDATA;
+	ENCRYPTIONINFO sEncryption;
 
+} SHAREDATA, * PSHAREDATA;

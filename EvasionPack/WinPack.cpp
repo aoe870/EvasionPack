@@ -3,7 +3,7 @@
 
 std::vector<std::string> DllNameTable{ "EvasionPackDll.dll" };
 
-WinPack::WinPack(std::string path)
+WinPack::WinPack(std::string path, std::string newFileName)
 {
 
 	//DWORD Frame = 1110; /* MUST be the very first thing in the function */
@@ -59,7 +59,7 @@ WinPack::WinPack(std::string path)
 
 	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress = 0;
 	peinfo.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].Size = 0;
-	
+	//
 	//添加新的区块
 	pe.AddSection(&peinfo, &dllinfo);
 
@@ -70,7 +70,10 @@ WinPack::WinPack(std::string path)
 	pe.PerformBaseRelocation(&peinfo, &dllinfo);
 
 	//疑惑加密
-	pe.XorAllSection(&peinfo, ShareData);
+//	pe.XorAllSection(&peinfo, ShareData);
+
+	//aes在加密一次
+	ShareData->sEncryption = pe.EncryptAllSection(&peinfo);
 
 	//压缩
 //	pe.CompressSection(&peinfo, ShareData);
@@ -79,7 +82,7 @@ WinPack::WinPack(std::string path)
 	pe.CopySectionData(&peinfo, &dllinfo);
 
 	//保存文件
-	SaveFile(&peinfo);
+	SaveFile(&peinfo, newFileName);
 }
 
 VOID WinPack::SavaPeInfo(pPEInfo peinfo, PSHAREDATA data)
@@ -103,6 +106,9 @@ VOID WinPack::SaveFile(pPEInfo pPEInfor, std::string name)
 	// 将目标文件的内容读取到创建的缓冲区中
 	DWORD Write = 0;
 	auto tmp = WriteFile(FileHandle, (LPVOID)pPEInfor->FileBuffer, pPEInfor->FileSize, &Write, NULL);	
+
+	PrintLog("succeed !", LOGTYPE_OUTPUT);
+
 	// 为了防止句柄泄露应该关闭句柄
 	CloseHandle(FileHandle);
 }

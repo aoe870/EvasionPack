@@ -43,15 +43,15 @@ void GetUserOperate(std::map<std::string, std::string> table) {
         //加壳
         else if (iter.first == "-f") {
 
-            //std::string newFileName = "demo_pack1.exe" ;
+            std::string newFileName = "demo_pack1.exe" ;
 
             for (auto map : table) {
                 if (map.first == "-n") {
-                    //newFileName = map.second;
+                    newFileName = map.second;
                 }
             }
 
-            WinPack pack(iter.second);
+            WinPack pack(iter.second, newFileName);
         }
         
     }
@@ -59,7 +59,7 @@ void GetUserOperate(std::map<std::string, std::string> table) {
 
 int main(int argc, char** argv)
 {
-    std::cout << LOGO << std::endl;
+//    std::cout << LOGO << std::endl;
 
     if (sizeof(argc) < 2) {
 
